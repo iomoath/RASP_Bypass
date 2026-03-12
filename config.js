@@ -50,6 +50,19 @@ var BYPASS_CONFIG = {
     IGNORED_NON_HTTP_PORTS: []
 };
 
+// Validate CERT_PEM is configured
+if (BYPASS_CONFIG.CERT_PEM && (
+    BYPASS_CONFIG.CERT_PEM.indexOf('[YOUR CA CERT HERE]') !== -1 ||
+    BYPASS_CONFIG.CERT_PEM.indexOf('[YOUR CA CERTIFICATE') !== -1 ||
+    BYPASS_CONFIG.CERT_PEM.indexOf('PUT YOUR') !== -1 ||
+    BYPASS_CONFIG.CERT_PEM.trim() === '' ||
+    BYPASS_CONFIG.CERT_PEM.trim() === '-----BEGIN CERTIFICATE-----\n-----END CERTIFICATE-----'
+)) {
+    console.log('\n\x1b[31m[!!!] WARNING: CERT_PEM is not configured!\x1b[0m');
+    console.log('[!!!] SSL pinning bypass modules will NOT work without a valid CA certificate.');
+    console.log('[!!!] Set BYPASS_CONFIG.CERT_PEM in config.js to your proxy CA certificate (PEM format).\n');
+}
+
 // Global compat exports (httptoolkit-style standalone module compat)
 var CERT_PEM              = BYPASS_CONFIG.CERT_PEM;
 var PROXY_HOST            = BYPASS_CONFIG.proxy.host;

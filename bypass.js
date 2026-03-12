@@ -41,6 +41,19 @@ var DEBUG_MODE            = BYPASS_CONFIG.debug;
 var PROXY_SUPPORTS_SOCKS5 = BYPASS_CONFIG.PROXY_SUPPORTS_SOCKS5;
 var IGNORED_NON_HTTP_PORTS = BYPASS_CONFIG.IGNORED_NON_HTTP_PORTS;
 
+// Validate CERT_PEM is configured
+if (BYPASS_CONFIG.CERT_PEM && (
+    BYPASS_CONFIG.CERT_PEM.indexOf('[YOUR CA CERT HERE]') !== -1 ||
+    BYPASS_CONFIG.CERT_PEM.indexOf('[YOUR CA CERTIFICATE') !== -1 ||
+    BYPASS_CONFIG.CERT_PEM.indexOf('PUT YOUR') !== -1 ||
+    BYPASS_CONFIG.CERT_PEM.trim() === '' ||
+    BYPASS_CONFIG.CERT_PEM.trim() === '-----BEGIN CERTIFICATE-----\n-----END CERTIFICATE-----'
+)) {
+    console.log('\n\x1b[31m[!!!] WARNING: CERT_PEM is not configured!\x1b[0m');
+    console.log('[!!!] SSL pinning bypass modules will NOT work without a valid CA certificate.');
+    console.log('[!!!] Set BYPASS_CONFIG.CERT_PEM in bypass.js to your proxy CA certificate (PEM format).\n');
+}
+
 // ── BYPASS_BUS ────────────────────────────────────────────────────────────
 var BYPASS_BUS = (function () {
     var _modules = {};
@@ -360,6 +373,7 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
 })();
 
 // ═══ lib/stealth-frida-hiding.js ═══
+try {
 /**
  * lib/stealth-frida-hiding.js — Frida OS-Level Hiding
  * RASP Bypass Toolkit — https://github.com/iomoath/RASP_Bypass
@@ -390,6 +404,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
 
     if (typeof BYPASS_BUS !== 'undefined') BYPASS_BUS.registerModule('stealthFrida', 'Frida OS-Level Hiding');
     if (typeof BYPASS_BUS !== 'undefined' && BYPASS_BUS.enabled.stealthFrida === false) return;
+
+    var _hookCount = 0;
+    var _failCount = 0;
 
     var FRIDA_STRINGS = [
         'frida', 'gum-js-loop', 'gmain', 'gdbus',
@@ -449,8 +466,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     } catch (_) {}
                 }
             });
+            _hookCount++;
             _log.ok('stealthFrida: /proc/self/maps filtering active');
-        } catch (e) { _log.debug('stealthFrida: maps hook failed — ' + e); }
+        } catch (e) { _failCount++; _log.debug('stealthFrida: maps hook failed — ' + e); }
     })();
 
     // 2. pthread/prctl — suppress Frida thread names
@@ -471,8 +489,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     }
                 }
             });
+            _hookCount++;
             _log.ok('stealthFrida: thread name masking active');
-        } catch (e) { _log.debug('stealthFrida: prctl hook failed — ' + e); }
+        } catch (e) { _failCount++; _log.debug('stealthFrida: prctl hook failed — ' + e); }
     })();
 
     // 3. connect() — block port 27042 probes
@@ -493,8 +512,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     if (this._block) retval.replace(ptr(-ECONNREFUSED));
                 }
             });
+            _hookCount++;
             _log.ok('stealthFrida: port 27042/27043 connect() block active');
-        } catch (e) { _log.debug('stealthFrida: connect hook failed — ' + e); }
+        } catch (e) { _failCount++; _log.debug('stealthFrida: connect hook failed — ' + e); }
     })();
 
     // 4. recvfrom() — D-Bus AUTH response filtering
@@ -518,8 +538,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     } catch (_) {}
                 }
             });
+            _hookCount++;
             _log.ok('stealthFrida: D-Bus recvfrom filtering active');
-        } catch (e) { _log.debug('stealthFrida: recvfrom hook failed — ' + e); }
+        } catch (e) { _failCount++; _log.debug('stealthFrida: recvfrom hook failed — ' + e); }
     })();
 
     // 5. access() — hide Frida files
@@ -539,8 +560,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     if (this._block) retval.replace(ptr(ENOENT));
                 }
             });
+            _hookCount++;
             _log.ok('stealthFrida: access() Frida file hiding active');
-        } catch (e) { _log.debug('stealthFrida: access hook failed — ' + e); }
+        } catch (e) { _failCount++; _log.debug('stealthFrida: access hook failed — ' + e); }
     })();
 
     // 6. dlopen() — filter Frida .so modules
@@ -559,8 +581,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     }
                 }
             });
+            _hookCount++;
             _log.ok('stealthFrida: dlopen() Frida .so filter active');
-        } catch (e) { _log.debug('stealthFrida: dlopen hook failed — ' + e); }
+        } catch (e) { _failCount++; _log.debug('stealthFrida: dlopen hook failed — ' + e); }
     })();
 
     // 7. inotify_add_watch — block watches on /proc/self/maps
@@ -577,8 +600,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     }
                 }
             });
+            _hookCount++;
             _log.ok('stealthFrida: inotify_add_watch filtering active');
-        } catch (e) { _log.debug('stealthFrida: inotify hook failed — ' + e); }
+        } catch (e) { _failCount++; _log.debug('stealthFrida: inotify hook failed — ' + e); }
     })();
 
     // 8. Java-layer: File.exists() — hide Frida paths
@@ -594,8 +618,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     }
                     return this.exists.call(this);
                 };
+                _hookCount++;
                 _log.ok('stealthFrida: Java File.exists() Frida path filter active');
-            } catch (e) { _log.debug('stealthFrida: Java File.exists hook failed — ' + e); }
+            } catch (e) { _failCount++; _log.debug('stealthFrida: Java File.exists hook failed — ' + e); }
         });
     })();
 
@@ -620,15 +645,19 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     }
                     return filtered;
                 };
+                _hookCount++;
                 _log.ok('stealthFrida: ActivityManager process list filtering active');
-            } catch (e) { _log.debug('stealthFrida: ActivityManager hook failed — ' + e); }
+            } catch (e) { _failCount++; _log.debug('stealthFrida: ActivityManager hook failed — ' + e); }
         });
     })();
 
+    console.log('[*] stealth-frida-hiding: ' + _hookCount + ' hooks installed, ' + _failCount + ' failed');
     _log.ok('stealth-frida-hiding.js loaded');
 })();
+} catch (e) { console.log('[!!!] Module "stealth-frida-hiding" failed to load: ' + e.message); }
 
 // ═══ lib/stealth-hook-detection.js ═══
+try {
 /**
  * lib/stealth-hook-detection.js — Hook Detection Countermeasures
  * RASP Bypass Toolkit — https://github.com/iomoath/RASP_Bypass
@@ -659,6 +688,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
 
     if (typeof BYPASS_BUS !== 'undefined') BYPASS_BUS.registerModule('stealthHook', 'Hook Detection Countermeasures');
     if (typeof BYPASS_BUS !== 'undefined' && BYPASS_BUS.enabled.stealthHook === false) return;
+
+    var _hookCount = 0;
+    var _failCount = 0;
 
     var RASP_PACKAGES = [
         'com.guardsquare', 'com.promon', 'com.appdome',
@@ -695,8 +727,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     }
                     return filtered;
                 };
+                _hookCount++;
                 _log.ok('stealthHook: Thread.getStackTrace() frida frame removal active');
-            } catch (e) { _log.debug('stealthHook: getStackTrace hook — ' + e); }
+            } catch (e) { _failCount++; _log.debug('stealthHook: getStackTrace hook — ' + e); }
 
             try {
                 var Throwable = Java.use('java.lang.Throwable');
@@ -711,8 +744,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     }
                     return filtered;
                 };
+                _hookCount++;
                 _log.ok('stealthHook: Throwable.getStackTrace() frida frame removal active');
-            } catch (e) { _log.debug('stealthHook: Throwable.getStackTrace hook — ' + e); }
+            } catch (e) { _failCount++; _log.debug('stealthHook: Throwable.getStackTrace hook — ' + e); }
         });
     })();
 
@@ -736,8 +770,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     } catch (_) {}
                 }
             });
+            _hookCount++;
             _log.ok('stealthHook: dladdr() GOT/PLT spoofing active');
-        } catch (e) { _log.debug('stealthHook: dladdr hook — ' + e); }
+        } catch (e) { _failCount++; _log.debug('stealthHook: dladdr hook — ' + e); }
     })();
 
     // 3. RASP telemetry neutralization
@@ -754,8 +789,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     }
                     return _origE.call(this, tag, msg);
                 };
+                _hookCount++;
                 _log.ok('stealthHook: RASP Log.e() telemetry suppression active');
-            } catch (e) { _log.debug('stealthHook: Log.e hook — ' + e); }
+            } catch (e) { _failCount++; _log.debug('stealthHook: Log.e hook — ' + e); }
         });
     })();
 
@@ -772,7 +808,8 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     }
                     this.exit(code);
                 };
-            } catch (e) { _log.debug('stealthHook: System.exit hook — ' + e); }
+                _hookCount++;
+            } catch (e) { _failCount++; _log.debug('stealthHook: System.exit hook — ' + e); }
 
             try {
                 var AndroidProcess = Java.use('android.os.Process');
@@ -784,7 +821,8 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     }
                     this.killProcess(pid);
                 };
-            } catch (e) { _log.debug('stealthHook: Process.killProcess hook — ' + e); }
+                _hookCount++;
+            } catch (e) { _failCount++; _log.debug('stealthHook: Process.killProcess hook — ' + e); }
 
             try {
                 var Runtime = Java.use('java.lang.Runtime');
@@ -795,7 +833,8 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     }
                     this.exit(code);
                 };
-            } catch (e) { _log.debug('stealthHook: Runtime.exit hook — ' + e); }
+                _hookCount++;
+            } catch (e) { _failCount++; _log.debug('stealthHook: Runtime.exit hook — ' + e); }
 
             try {
                 var Activity = Java.use('android.app.Activity');
@@ -806,16 +845,20 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     }
                     this.finish();
                 };
-            } catch (e) { _log.debug('stealthHook: Activity.finish hook — ' + e); }
+                _hookCount++;
+            } catch (e) { _failCount++; _log.debug('stealthHook: Activity.finish hook — ' + e); }
 
             _log.ok('stealthHook: anti-termination hooks active');
         });
     })();
 
+    console.log('[*] stealth-hook-detection: ' + _hookCount + ' hooks installed, ' + _failCount + ' failed');
     _log.ok('stealth-hook-detection.js loaded');
 })();
+} catch (e) { console.log('[!!!] Module "stealth-hook-detection" failed to load: ' + e.message); }
 
 // ═══ lib/root-detection-bypass.js ═══
+try {
 /**
  * lib/root-detection-bypass.js — Root / Magisk / KernelSU Detection Bypass
  * RASP Bypass Toolkit — https://github.com/iomoath/RASP_Bypass
@@ -846,6 +889,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
 
     if (typeof BYPASS_BUS !== 'undefined') BYPASS_BUS.registerModule('root', 'Root/Magisk/KernelSU Hiding');
     if (typeof BYPASS_BUS !== 'undefined' && BYPASS_BUS.enabled.root === false) return;
+
+    var _hookCount = 0;
+    var _failCount = 0;
 
     var ROOT_PATHS = [
         '/su', '/su/bin/su', '/system/bin/su', '/system/xbin/su',
@@ -914,8 +960,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     }
                     return this.canExecute.call(this);
                 };
+                _hookCount++;
                 _log.ok('root: Java File hooks active');
-            } catch (e) { _log.debug('root: Java File hook failed — ' + e); }
+            } catch (e) { _failCount++; _log.debug('root: Java File hook failed — ' + e); }
         });
     })();
 
@@ -934,8 +981,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     if (cmds && cmds.length > 0 && isSuCmd(cmds[0])) throw IOExcept.$new('Permission denied');
                     return this.exec(cmds);
                 };
+                _hookCount++;
                 _log.ok('root: Runtime.exec() su blocking active');
-            } catch (e) { _log.debug('root: Runtime.exec hook failed — ' + e); }
+            } catch (e) { _failCount++; _log.debug('root: Runtime.exec hook failed — ' + e); }
         });
     })();
 
@@ -962,6 +1010,7 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     });
                 } catch (_) {}
             });
+            _hookCount++;
             _log.ok('root: RootBeer hooks applied');
         });
     })();
@@ -974,7 +1023,7 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                 var Build = Java.use('android.os.Build');
                 Build.TAGS.value = 'release-keys';
                 _log.ok('root: Build.TAGS set to release-keys');
-            } catch (e) { _log.debug('root: Build.TAGS hook failed — ' + e); }
+            } catch (e) { _failCount++; _log.debug('root: Build.TAGS hook failed — ' + e); }
 
             try {
                 var SystemProperties = Java.use('android.os.SystemProperties');
@@ -990,8 +1039,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     if (key === 'ro.secure')       return '1';
                     return this.get(key, def);
                 };
+                _hookCount++;
                 _log.ok('root: SystemProperties spoofing active');
-            } catch (e) { _log.debug('root: SystemProperties hook failed — ' + e); }
+            } catch (e) { _failCount++; _log.debug('root: SystemProperties hook failed — ' + e); }
         });
     })();
 
@@ -1017,8 +1067,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     }
                     return this.getPackageInfo(pkg, flags);
                 };
+                _hookCount++;
                 _log.ok('root: PackageManager hiding root apps active');
-            } catch (e) { _log.debug('root: PackageManager hook failed — ' + e); }
+            } catch (e) { _failCount++; _log.debug('root: PackageManager hook failed — ' + e); }
         });
     })();
 
@@ -1057,8 +1108,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     }
                 });
             });
+            _hookCount++;
             _log.ok('root: native access()/stat() root path hiding active');
-        } catch (e) { _log.debug('root: native stat/access hook failed — ' + e); }
+        } catch (e) { _failCount++; _log.debug('root: native stat/access hook failed — ' + e); }
     })();
 
     // 7. __system_property_get — native property spoofing
@@ -1079,8 +1131,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     }
                 }
             });
+            _hookCount++;
             _log.ok('root: __system_property_get spoofing active');
-        } catch (e) { _log.debug('root: __system_property_get hook failed — ' + e); }
+        } catch (e) { _failCount++; _log.debug('root: __system_property_get hook failed — ' + e); }
     })();
 
     // 8. BufferedReader.readLine — filter build.prop su entries
@@ -1099,15 +1152,19 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     }
                     return line;
                 };
+                _hookCount++;
                 _log.ok('root: BufferedReader.readLine() filter active');
-            } catch (e) { _log.debug('root: BufferedReader hook failed — ' + e); }
+            } catch (e) { _failCount++; _log.debug('root: BufferedReader hook failed — ' + e); }
         });
     })();
 
+    console.log('[*] root-detection-bypass: ' + _hookCount + ' hooks installed, ' + _failCount + ' failed');
     _log.ok('root-detection-bypass.js loaded');
 })();
+} catch (e) { console.log('[!!!] Module "root-detection-bypass" failed to load: ' + e.message); }
 
 // ═══ lib/frida-detection-bypass.js ═══
+try {
 /**
  * lib/frida-detection-bypass.js — App-Level Frida Detection Defeat
  * RASP Bypass Toolkit — https://github.com/iomoath/RASP_Bypass
@@ -1138,6 +1195,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
 
     if (typeof BYPASS_BUS !== 'undefined') BYPASS_BUS.registerModule('frida', 'App-Level Frida Detection Defeat');
     if (typeof BYPASS_BUS !== 'undefined' && BYPASS_BUS.enabled.frida === false) return;
+
+    var _hookCount = 0;
+    var _failCount = 0;
 
     var FRIDA_ARTIFACTS = [
         'frida', 'frida-agent', 'frida-gadget', 'frida-server',
@@ -1201,8 +1261,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     } catch (_) {}
                 }
             });
+            _hookCount++;
             _log.ok('frida: /proc/self/maps filtering active');
-        } catch (e) { _log.debug('frida: maps read hook failed — ' + e); }
+        } catch (e) { _failCount++; _log.debug('frida: maps read hook failed — ' + e); }
     })();
 
     // 2. dlopen() — filter Frida modules from ELF enumeration
@@ -1221,8 +1282,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     }
                 }
             });
+            _hookCount++;
             _log.ok('frida: dlopen() artifact filtering active');
-        } catch (e) { _log.debug('frida: dlopen hook failed — ' + e); }
+        } catch (e) { _failCount++; _log.debug('frida: dlopen hook failed — ' + e); }
     })();
 
     // 3. Java: Class.forName() — block Frida class enumeration
@@ -1240,8 +1302,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     }
                     return this.forName(name);
                 };
+                _hookCount++;
                 _log.ok('frida: Class.forName() Frida class block active');
-            } catch (e) { _log.debug('frida: Class.forName hook failed — ' + e); }
+            } catch (e) { _failCount++; _log.debug('frida: Class.forName hook failed — ' + e); }
         });
     })();
 
@@ -1262,8 +1325,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     if (this._block) retval.replace(ptr(-111)); // ECONNREFUSED
                 }
             });
+            _hookCount++;
             _log.ok('frida: connect() port 27042/27043 block active');
-        } catch (e) { _log.debug('frida: connect hook failed — ' + e); }
+        } catch (e) { _failCount++; _log.debug('frida: connect hook failed — ' + e); }
     })();
 
     // 5. openat() — suppress /proc/*/cmdline frida scanning
@@ -1279,7 +1343,7 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     }
                 }
             });
-        } catch (e) { _log.debug('frida: cmdline openat hook — ' + e); }
+        } catch (e) { _failCount++; _log.debug('frida: cmdline openat hook — ' + e); }
     })();
 
     // 6. inotify_add_watch — block watches on Frida-sensitive paths
@@ -1295,14 +1359,18 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     }
                 }
             });
+            _hookCount++;
             _log.ok('frida: inotify_add_watch suppression active');
-        } catch (e) { _log.debug('frida: inotify hook — ' + e); }
+        } catch (e) { _failCount++; _log.debug('frida: inotify hook — ' + e); }
     })();
 
+    console.log('[*] frida-detection-bypass: ' + _hookCount + ' hooks installed, ' + _failCount + ' failed');
     _log.ok('frida-detection-bypass.js loaded');
 })();
+} catch (e) { console.log('[!!!] Module "frida-detection-bypass" failed to load: ' + e.message); }
 
 // ═══ lib/debugger-detection-bypass.js ═══
+try {
 /**
  * lib/debugger-detection-bypass.js — Debugger / ptrace Detection Bypass
  * RASP Bypass Toolkit — https://github.com/iomoath/RASP_Bypass
@@ -1334,6 +1402,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
     if (typeof BYPASS_BUS !== 'undefined') BYPASS_BUS.registerModule('debugger', 'Debugger/ptrace Neutralization');
     if (typeof BYPASS_BUS !== 'undefined' && BYPASS_BUS.enabled.debugger === false) return;
 
+    var _hookCount = 0;
+    var _failCount = 0;
+
     var PTRACE_TRACEME  = 0;
     var PR_SET_DUMPABLE = 4;
 
@@ -1348,8 +1419,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     if (this._req === PTRACE_TRACEME) retval.replace(ptr(0));
                 }
             });
+            _hookCount++;
             _log.ok('debugger: ptrace(PTRACE_TRACEME) → 0');
-        } catch (e) { _log.debug('debugger: ptrace hook failed — ' + e); }
+        } catch (e) { _failCount++; _log.debug('debugger: ptrace hook failed — ' + e); }
     })();
 
     // 2. /proc/self/status — filter TracerPid
@@ -1391,8 +1463,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     } catch (_) {}
                 }
             });
+            _hookCount++;
             _log.ok('debugger: /proc/self/status TracerPid → 0');
-        } catch (e) { _log.debug('debugger: status read hook failed — ' + e); }
+        } catch (e) { _failCount++; _log.debug('debugger: status read hook failed — ' + e); }
     })();
 
     // 3. prctl(PR_SET_DUMPABLE) — force dumpable = 1
@@ -1405,8 +1478,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     if (args[0].toInt32() === PR_SET_DUMPABLE) args[1] = ptr(1);
                 }
             });
+            _hookCount++;
             _log.ok('debugger: prctl PR_SET_DUMPABLE forced to 1');
-        } catch (e) { _log.debug('debugger: prctl hook failed — ' + e); }
+        } catch (e) { _failCount++; _log.debug('debugger: prctl hook failed — ' + e); }
     })();
 
     // 4. signal / sigaction — suppress SIGTRAP-based anti-debug
@@ -1422,7 +1496,8 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     }
                 }
             });
-        } catch (e) { _log.debug('debugger: sigaction hook failed — ' + e); }
+            _hookCount++;
+        } catch (e) { _failCount++; _log.debug('debugger: sigaction hook failed — ' + e); }
     })();
 
     // 5. Java: Debug.isDebuggerConnected() → false
@@ -1432,8 +1507,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
             try {
                 var Debug = Java.use('android.os.Debug');
                 Debug.isDebuggerConnected.implementation = function () { return false; };
+                _hookCount++;
                 _log.ok('debugger: Debug.isDebuggerConnected() → false');
-            } catch (e) { _log.debug('debugger: Debug hook failed — ' + e); }
+            } catch (e) { _failCount++; _log.debug('debugger: Debug hook failed — ' + e); }
 
             try {
                 var AppInfo = Java.use('android.content.pm.ApplicationInfo');
@@ -1451,9 +1527,10 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                 var VMDebug = Java.use('dalvik.system.VMDebug');
                 if (VMDebug.isDebuggingEnabled) {
                     VMDebug.isDebuggingEnabled.implementation = function () { return false; };
+                    _hookCount++;
                     _log.ok('debugger: VMDebug.isDebuggingEnabled() → false');
                 }
-            } catch (e) { _log.debug('debugger: VMDebug hook — ' + e); }
+            } catch (e) { _failCount++; _log.debug('debugger: VMDebug hook — ' + e); }
         });
     })();
 
@@ -1467,14 +1544,18 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     if (retval.toInt32() > 1) retval.replace(ptr(1));
                 }
             });
+            _hookCount++;
             _log.ok('debugger: getppid() → 1 (init)');
-        } catch (e) { _log.debug('debugger: getppid hook — ' + e); }
+        } catch (e) { _failCount++; _log.debug('debugger: getppid hook — ' + e); }
     })();
 
+    console.log('[*] debugger-detection-bypass: ' + _hookCount + ' hooks installed, ' + _failCount + ' failed');
     _log.ok('debugger-detection-bypass.js loaded');
 })();
+} catch (e) { console.log('[!!!] Module "debugger-detection-bypass" failed to load: ' + e.message); }
 
 // ═══ lib/emulator-detection-bypass.js ═══
+try {
 /**
  * lib/emulator-detection-bypass.js — Emulator Detection Bypass
  * RASP Bypass Toolkit — https://github.com/iomoath/RASP_Bypass
@@ -1506,6 +1587,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
 
     if (typeof BYPASS_BUS !== 'undefined') BYPASS_BUS.registerModule('emulator', 'Emulator Detection Bypass');
     if (typeof BYPASS_BUS !== 'undefined' && BYPASS_BUS.enabled.emulator === false) return;
+
+    var _hookCount = 0;
+    var _failCount = 0;
 
     var REAL_DEVICE = {
         HARDWARE   : 'qcom',
@@ -1547,8 +1631,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                 Object.keys(REAL_DEVICE).forEach(function (field) {
                     try { Build[field].value = REAL_DEVICE[field]; } catch (_) {}
                 });
+                _hookCount++;
                 _log.ok('emulator: Build.* spoofed to real device values');
-            } catch (e) { _log.debug('emulator: Build spoof — ' + e); }
+            } catch (e) { _failCount++; _log.debug('emulator: Build spoof — ' + e); }
 
             try {
                 var BuildVersion = Java.use('android.os.Build$VERSION');
@@ -1556,8 +1641,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                 BuildVersion.SDK_INT.value    = 34;
                 BuildVersion.CODENAME.value   = 'REL';
                 BuildVersion.INCREMENTAL.value = '10754064';
+                _hookCount++;
                 _log.ok('emulator: Build.VERSION spoofed');
-            } catch (e) { _log.debug('emulator: Build.VERSION — ' + e); }
+            } catch (e) { _failCount++; _log.debug('emulator: Build.VERSION — ' + e); }
         });
     })();
 
@@ -1581,8 +1667,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                 try { TM.getPhoneType.overload().implementation = function () { return 1; }; } catch (_) {}
                 try { TM.getSimState.overload().implementation = function () { return 5; }; } catch (_) {}
 
+                _hookCount++;
                 _log.ok('emulator: TelephonyManager spoofed');
-            } catch (e) { _log.debug('emulator: TelephonyManager hook — ' + e); }
+            } catch (e) { _failCount++; _log.debug('emulator: TelephonyManager hook — ' + e); }
         });
     })();
 
@@ -1602,8 +1689,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     if (this._block) retval.replace(ptr(-2)); // ENOENT
                 }
             });
+            _hookCount++;
             _log.ok('emulator: emulator file access() blocking active');
-        } catch (e) { _log.debug('emulator: emulator access hook — ' + e); }
+        } catch (e) { _failCount++; _log.debug('emulator: emulator access hook — ' + e); }
     })();
 
     // 4. __system_property_get — spoof emulator properties
@@ -1623,14 +1711,18 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     }
                 }
             });
+            _hookCount++;
             _log.ok('emulator: __system_property_get emulator property spoofing active');
-        } catch (e) { _log.debug('emulator: __system_property_get hook — ' + e); }
+        } catch (e) { _failCount++; _log.debug('emulator: __system_property_get hook — ' + e); }
     })();
 
+    console.log('[*] emulator-detection-bypass: ' + _hookCount + ' hooks installed, ' + _failCount + ' failed');
     _log.ok('emulator-detection-bypass.js loaded');
 })();
+} catch (e) { console.log('[!!!] Module "emulator-detection-bypass" failed to load: ' + e.message); }
 
 // ═══ lib/vpn-detection-bypass.js ═══
+try {
 /**
  * lib/vpn-detection-bypass.js — VPN Detection Bypass
  * RASP Bypass Toolkit — https://github.com/iomoath/RASP_Bypass
@@ -1662,6 +1754,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
     if (typeof BYPASS_BUS !== 'undefined') BYPASS_BUS.registerModule('vpn', 'VPN Detection Bypass');
     if (typeof BYPASS_BUS !== 'undefined' && BYPASS_BUS.enabled.vpn === false) return;
 
+    var _hookCount = 0;
+    var _failCount = 0;
+
     var VPN_IFACE_PREFIXES = ['tun', 'ppp', 'tap'];
 
     // 1. NetworkInterface.getNetworkInterfaces() — filter VPN interfaces
@@ -1687,8 +1782,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     }
                     return Collections.enumeration(filtered);
                 };
+                _hookCount++;
                 _log.ok('vpn: NetworkInterface VPN filtering active');
-            } catch (e) { _log.debug('vpn: NetworkInterface hook — ' + e); }
+            } catch (e) { _failCount++; _log.debug('vpn: NetworkInterface hook — ' + e); }
         });
     })();
 
@@ -1703,8 +1799,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     if (transport === TRANSPORT_VPN) return false;
                     return this.hasTransport(transport);
                 };
+                _hookCount++;
                 _log.ok('vpn: NetworkCapabilities TRANSPORT_VPN hidden');
-            } catch (e) { _log.debug('vpn: NetworkCapabilities hook — ' + e); }
+            } catch (e) { _failCount++; _log.debug('vpn: NetworkCapabilities hook — ' + e); }
         });
     })();
 
@@ -1720,8 +1817,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     if (info !== null && info.getType() === TYPE_VPN) return null;
                     return info;
                 };
+                _hookCount++;
                 _log.ok('vpn: ConnectivityManager TYPE_VPN hidden');
-            } catch (e) { _log.debug('vpn: ConnectivityManager hook — ' + e); }
+            } catch (e) { _failCount++; _log.debug('vpn: ConnectivityManager hook — ' + e); }
         });
     })();
 
@@ -1769,8 +1867,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     } catch (_) {}
                 }
             });
+            _hookCount++;
             _log.ok('vpn: /proc/net/if_inet6 VPN interface filtering active');
-        } catch (e) { _log.debug('vpn: if_inet6 hook — ' + e); }
+        } catch (e) { _failCount++; _log.debug('vpn: if_inet6 hook — ' + e); }
     })();
 
     // 5. System.getProperty proxy check suppression
@@ -1797,13 +1896,16 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     _log.debug('vpn: getifaddrs() called');
                 }
             });
-        } catch (e) { _log.debug('vpn: getifaddrs hook — ' + e); }
+        } catch (e) { _failCount++; _log.debug('vpn: getifaddrs hook — ' + e); }
     })();
 
+    console.log('[*] vpn-detection-bypass: ' + _hookCount + ' hooks installed, ' + _failCount + ' failed');
     _log.ok('vpn-detection-bypass.js loaded');
 })();
+} catch (e) { console.log('[!!!] Module "vpn-detection-bypass" failed to load: ' + e.message); }
 
 // ═══ lib/developer-mode-bypass.js ═══
+try {
 /**
  * lib/developer-mode-bypass.js — Developer Mode Hiding
  * RASP Bypass Toolkit — https://github.com/iomoath/RASP_Bypass
@@ -1835,6 +1937,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
     if (typeof BYPASS_BUS !== 'undefined') BYPASS_BUS.registerModule('devMode', 'Developer Mode Hiding');
     if (typeof BYPASS_BUS !== 'undefined' && BYPASS_BUS.enabled.devMode === false) return;
 
+    var _hookCount = 0;
+    var _failCount = 0;
+
     var DEV_SETTINGS = {
         'adb_enabled'                  : '0',
         'development_settings_enabled' : '0',
@@ -1862,8 +1967,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                         if (DEV_SETTINGS[name] !== undefined) return DEV_SETTINGS[name];
                         return this.getString(cr, name);
                     };
+                    _hookCount++;
                     _log.ok('devMode: ' + cls + ' developer mode spoofing active');
-                } catch (e) { _log.debug('devMode: Settings hook for ' + cls + ' — ' + e); }
+                } catch (e) { _failCount++; _log.debug('devMode: Settings hook for ' + cls + ' — ' + e); }
             });
         });
     })();
@@ -1891,14 +1997,18 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     }
                 }
             });
+            _hookCount++;
             _log.ok('devMode: ADB system property spoofing active');
-        } catch (e) { _log.debug('devMode: ADB system props hook — ' + e); }
+        } catch (e) { _failCount++; _log.debug('devMode: ADB system props hook — ' + e); }
     })();
 
+    console.log('[*] developer-mode-bypass: ' + _hookCount + ' hooks installed, ' + _failCount + ' failed');
     _log.ok('developer-mode-bypass.js loaded');
 })();
+} catch (e) { console.log('[!!!] Module "developer-mode-bypass" failed to load: ' + e.message); }
 
 // ═══ lib/accessibility-bypass.js ═══
+try {
 /**
  * lib/accessibility-bypass.js — Accessibility Service Hiding
  * RASP Bypass Toolkit — https://github.com/iomoath/RASP_Bypass
@@ -1930,6 +2040,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
     if (typeof BYPASS_BUS !== 'undefined') BYPASS_BUS.registerModule('accessibility', 'Accessibility Service Hiding');
     if (typeof BYPASS_BUS !== 'undefined' && BYPASS_BUS.enabled.accessibility === false) return;
 
+    var _hookCount = 0;
+    var _failCount = 0;
+
     // 1. AccessibilityManager hooks
     (function hookAccessibilityManager() {
         if (!Java.available) return;
@@ -1943,9 +2056,10 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     return Java.use('java.util.ArrayList').$new();
                 };
 
+                _hookCount++;
                 _log.ok('accessibility: AccessibilityManager.isEnabled() → false');
                 _log.ok('accessibility: getEnabledAccessibilityServiceList() → empty');
-            } catch (e) { _log.debug('accessibility: AccessibilityManager hook — ' + e); }
+            } catch (e) { _failCount++; _log.debug('accessibility: AccessibilityManager hook — ' + e); }
         });
     })();
 
@@ -1973,15 +2087,19 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     return this.getInt(cr, name, def);
                 };
 
+                _hookCount++;
                 _log.ok('accessibility: Settings.Secure accessibility hiding active');
-            } catch (e) { _log.debug('accessibility: Settings.Secure hook — ' + e); }
+            } catch (e) { _failCount++; _log.debug('accessibility: Settings.Secure hook — ' + e); }
         });
     })();
 
+    console.log('[*] accessibility-bypass: ' + _hookCount + ' hooks installed, ' + _failCount + ' failed');
     _log.ok('accessibility-bypass.js loaded');
 })();
+} catch (e) { console.log('[!!!] Module "accessibility-bypass" failed to load: ' + e.message); }
 
 // ═══ lib/screen-capture-bypass.js ═══
+try {
 /**
  * lib/screen-capture-bypass.js — Screen Capture Bypass
  * RASP Bypass Toolkit — https://github.com/iomoath/RASP_Bypass
@@ -2013,6 +2131,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
     if (typeof BYPASS_BUS !== 'undefined') BYPASS_BUS.registerModule('screenCapture', 'Screen Capture Bypass');
     if (typeof BYPASS_BUS !== 'undefined' && BYPASS_BUS.enabled.screenCapture === false) return;
 
+    var _hookCount = 0;
+    var _failCount = 0;
+
     var FLAG_SECURE = 8192; // 0x2000
 
     // 1. Window.setFlags() — clear FLAG_SECURE
@@ -2026,8 +2147,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     mask  = mask  & ~FLAG_SECURE;
                     return this.setFlags(flags, mask);
                 };
+                _hookCount++;
                 _log.ok('screenCapture: Window.setFlags() FLAG_SECURE cleared');
-            } catch (e) { _log.debug('screenCapture: Window.setFlags hook — ' + e); }
+            } catch (e) { _failCount++; _log.debug('screenCapture: Window.setFlags hook — ' + e); }
 
             // 2. Window.addFlags() — clear FLAG_SECURE
             try {
@@ -2036,8 +2158,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     flags = flags & ~FLAG_SECURE;
                     return this.addFlags(flags);
                 };
+                _hookCount++;
                 _log.ok('screenCapture: Window.addFlags() FLAG_SECURE cleared');
-            } catch (e) { _log.debug('screenCapture: Window.addFlags hook — ' + e); }
+            } catch (e) { _failCount++; _log.debug('screenCapture: Window.addFlags hook — ' + e); }
         });
     })();
 
@@ -2051,8 +2174,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     flags = flags & ~FLAG_SECURE;
                     return this.$init(w, h, type, flags, format);
                 };
+                _hookCount++;
                 _log.ok('screenCapture: WindowManager.LayoutParams FLAG_SECURE cleared');
-            } catch (e) { _log.debug('screenCapture: LayoutParams hook — ' + e); }
+            } catch (e) { _failCount++; _log.debug('screenCapture: LayoutParams hook — ' + e); }
         });
     })();
 
@@ -2066,16 +2190,20 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     SurfaceView.setSecure.implementation = function (isSecure) {
                         // no-op: always allow capture
                     };
+                    _hookCount++;
                     _log.ok('screenCapture: SurfaceView.setSecure() → no-op');
                 }
-            } catch (e) { _log.debug('screenCapture: SurfaceView.setSecure hook — ' + e); }
+            } catch (e) { _failCount++; _log.debug('screenCapture: SurfaceView.setSecure hook — ' + e); }
         });
     })();
 
+    console.log('[*] screen-capture-bypass: ' + _hookCount + ' hooks installed, ' + _failCount + ' failed');
     _log.ok('screen-capture-bypass.js loaded');
 })();
+} catch (e) { console.log('[!!!] Module "screen-capture-bypass" failed to load: ' + e.message); }
 
 // ═══ lib/app-cloning-bypass.js ═══
+try {
 /**
  * lib/app-cloning-bypass.js — App Cloning Detection Bypass
  * RASP Bypass Toolkit — https://github.com/iomoath/RASP_Bypass
@@ -2107,6 +2235,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
     if (typeof BYPASS_BUS !== 'undefined') BYPASS_BUS.registerModule('appCloning', 'App Cloning Detection Bypass');
     if (typeof BYPASS_BUS !== 'undefined' && BYPASS_BUS.enabled.appCloning === false) return;
 
+    var _hookCount = 0;
+    var _failCount = 0;
+
     // Known clone/dual-space package name patterns
     var CLONE_PKG_PATTERNS = [
         '.clone', '.dual', '.parallel', '.secondspace',
@@ -2129,8 +2260,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
             try {
                 var UserManager = Java.use('android.os.UserManager');
                 UserManager.isUserAGoat.implementation = function () { return false; };
+                _hookCount++;
                 _log.ok('appCloning: UserManager.isUserAGoat() → false');
-            } catch (e) { _log.debug('appCloning: isUserAGoat hook — ' + e); }
+            } catch (e) { _failCount++; _log.debug('appCloning: isUserAGoat hook — ' + e); }
         });
     })();
 
@@ -2149,8 +2281,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     if (profiles.size() > 0) filtered.add(profiles.get(0));
                     return filtered;
                 };
+                _hookCount++;
                 _log.ok('appCloning: UserManager.getUserProfiles() filtered to primary user');
-            } catch (e) { _log.debug('appCloning: getUserProfiles hook — ' + e); }
+            } catch (e) { _failCount++; _log.debug('appCloning: getUserProfiles hook — ' + e); }
         });
     })();
 
@@ -2172,8 +2305,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     }
                     return filtered;
                 };
+                _hookCount++;
                 _log.ok('appCloning: ActivityManager process list clone filtering active');
-            } catch (e) { _log.debug('appCloning: ActivityManager hook — ' + e); }
+            } catch (e) { _failCount++; _log.debug('appCloning: ActivityManager hook — ' + e); }
         });
     })();
 
@@ -2192,8 +2326,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     }
                     return filtered;
                 };
+                _hookCount++;
                 _log.ok('appCloning: PackageManager clone app hiding active');
-            } catch (e) { _log.debug('appCloning: PackageManager hook — ' + e); }
+            } catch (e) { _failCount++; _log.debug('appCloning: PackageManager hook — ' + e); }
         });
     })();
 
@@ -2211,15 +2346,19 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     }
                     return path;
                 };
+                _hookCount++;
                 _log.ok('appCloning: File path normalization active');
-            } catch (e) { _log.debug('appCloning: File.getCanonicalPath hook — ' + e); }
+            } catch (e) { _failCount++; _log.debug('appCloning: File.getCanonicalPath hook — ' + e); }
         });
     })();
 
+    console.log('[*] app-cloning-bypass: ' + _hookCount + ' hooks installed, ' + _failCount + ' failed');
     _log.ok('app-cloning-bypass.js loaded');
 })();
+} catch (e) { console.log('[!!!] Module "app-cloning-bypass" failed to load: ' + e.message); }
 
 // ═══ lib/android-ssl-pinning-bypass.js ═══
+try {
 /**
  * lib/android-ssl-pinning-bypass.js — Java SSL Unpinning (20+ libraries)
  * RASP Bypass Toolkit — https://github.com/iomoath/RASP_Bypass
@@ -2250,6 +2389,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
 
     if (typeof BYPASS_BUS !== 'undefined') BYPASS_BUS.registerModule('sslPinning', 'Java SSL Unpinning (20+ libs)');
     if (typeof BYPASS_BUS !== 'undefined' && BYPASS_BUS.enabled.sslPinning === false) return;
+
+    var _hookCount = 0;
+    var _failCount = 0;
 
     var _certPem = (typeof CERT_PEM !== 'undefined') ? CERT_PEM : (_CFG.CERT_PEM || null);
 
@@ -2438,6 +2580,7 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                         ? cls[fix.method].overload.apply(cls[fix.method], fix.types)
                         : cls[fix.method];
                     method.implementation = fix.impl;
+                    _hookCount++;
                     _log.ok('sslPinning: hooked ' + fix.className + '.' + fix.method);
                 } catch (e) {
                     _log.debug('sslPinning: skip ' + fix.className + '.' + fix.method + ' — ' + e.message);
@@ -2459,16 +2602,20 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     var ks = KeyStore.getInstance('AndroidCAStore');
                     ks.load(null, null);
                     ks.setCertificateEntry('bypass_injected_ca', cert);
+                    _hookCount++;
                     _log.ok('sslPinning: custom CA injected from CERT_PEM');
-                } catch (e) { _log.debug('sslPinning: CERT_PEM injection — ' + e); }
+                } catch (e) { _failCount++; _log.debug('sslPinning: CERT_PEM injection — ' + e); }
             }
         });
     })();
 
+    console.log('[*] android-ssl-pinning-bypass: ' + _hookCount + ' hooks installed, ' + _failCount + ' failed');
     _log.ok('android-ssl-pinning-bypass.js loaded');
 })();
+} catch (e) { console.log('[!!!] Module "android-ssl-pinning-bypass" failed to load: ' + e.message); }
 
 // ═══ lib/android-ssl-pinning-bypass-fallback.js ═══
+try {
 /**
  * lib/android-ssl-pinning-bypass-fallback.js — Auto-Fallback SSL Patcher
  * RASP Bypass Toolkit — https://github.com/iomoath/RASP_Bypass
@@ -2499,6 +2646,35 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
 
     if (typeof BYPASS_BUS !== 'undefined') BYPASS_BUS.registerModule('sslFallback', 'Auto-Fallback SSL Patcher');
     if (typeof BYPASS_BUS !== 'undefined' && BYPASS_BUS.enabled.sslFallback === false) return;
+
+    var _hookCount = 0;
+    var _failCount = 0;
+
+    // Self-contained helpers — needed when running standalone without android-ssl-pinning-bypass.js
+    var _buildX509CertificateFromBytes = (typeof buildX509CertificateFromBytes !== 'undefined')
+        ? buildX509CertificateFromBytes
+        : function(certBytes) {
+            var ByteArrayInputStream = Java.use('java.io.ByteArrayInputStream');
+            var CertFactory = Java.use('java.security.cert.CertificateFactory');
+            var certFactory = CertFactory.getInstance('X.509');
+            return certFactory.generateCertificate(ByteArrayInputStream.$new(certBytes));
+        };
+
+    var _getCustomX509TrustManager = (typeof getCustomX509TrustManager !== 'undefined')
+        ? getCustomX509TrustManager
+        : function() {
+            var TrustManagerCls = Java.use('javax.net.ssl.X509TrustManager');
+            var trustManager = Java.registerClass({
+                name: 'com.bypass.FallbackTrustManager',
+                implements: [TrustManagerCls],
+                methods: {
+                    checkClientTrusted: function (_chain, _authType) {},
+                    checkServerTrusted: function (_chain, _authType) {},
+                    getAcceptedIssuers: function () { return []; }
+                }
+            });
+            return trustManager.$new();
+        };
 
     (function buildUnhandledErrorPatcher() {
         if (!Java.available) return;
@@ -2544,8 +2720,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     }
                     return this.$init(msg);
                 };
+                _hookCount++;
                 _log.ok('sslFallback: SSLPeerUnverifiedException auto-patcher active');
-            } catch (e) { _log.debug('sslFallback: SSLPeerUnverifiedException hook — ' + e); }
+            } catch (e) { _failCount++; _log.debug('sslFallback: SSLPeerUnverifiedException hook — ' + e); }
 
             // Hook CertificateException constructor → auto-patch X509TrustManager
             try {
@@ -2559,8 +2736,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     }
                     return this.$init(msg);
                 };
+                _hookCount++;
                 _log.ok('sslFallback: CertificateException auto-patcher active');
-            } catch (e) { _log.debug('sslFallback: CertificateException hook — ' + e); }
+            } catch (e) { _failCount++; _log.debug('sslFallback: CertificateException hook — ' + e); }
 
             // Auto-detect OkHttp check methods via RuntimeException scanning
             try {
@@ -2577,8 +2755,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     }
                     return this.$init(msg);
                 };
+                _hookCount++;
                 _log.ok('sslFallback: RuntimeException SSL failure scanner active');
-            } catch (e) { _log.debug('sslFallback: RuntimeException hook — ' + e); }
+            } catch (e) { _failCount++; _log.debug('sslFallback: RuntimeException hook — ' + e); }
 
             // Auto-detect X509TrustManager implementations via classloader scanning
             try {
@@ -2596,6 +2775,7 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                         }
                     },
                     onComplete: function () {
+                        _hookCount++;
                         _log.ok('sslFallback: class enumeration scan complete');
                     }
                 });
@@ -2603,10 +2783,13 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
         });
     })();
 
+    console.log('[*] android-ssl-pinning-bypass-fallback: ' + _hookCount + ' hooks installed, ' + _failCount + ' failed');
     _log.ok('android-ssl-pinning-bypass-fallback.js loaded');
 })();
+} catch (e) { console.log('[!!!] Module "android-ssl-pinning-bypass-fallback" failed to load: ' + e.message); }
 
 // ═══ lib/android-system-certificate-injection.js ═══
+try {
 /**
  * lib/android-system-certificate-injection.js — System CA Certificate Injection
  * RASP Bypass Toolkit — https://github.com/iomoath/RASP_Bypass
@@ -2639,6 +2822,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
     if (typeof BYPASS_BUS !== 'undefined') BYPASS_BUS.registerModule('certInjection', 'System CA Certificate Injection');
     if (typeof BYPASS_BUS !== 'undefined' && BYPASS_BUS.enabled.certInjection === false) return;
 
+    var _hookCount = 0;
+    var _failCount = 0;
+
     var _certPem  = (typeof CERT_PEM !== 'undefined') ? CERT_PEM : (_CFG.CERT_PEM || null);
     var CA_CERT_PATH = (_CFG.ca && _CFG.ca.certPath) || '/data/local/tmp/burp.crt';
 
@@ -2648,7 +2834,7 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                 var Base64 = Java.use('android.util.Base64');
                 var stripped = _certPem.replace(/-----[^-]+-----/g, '').replace(/\s+/g, '');
                 return Base64.decode(stripped, 0);
-            } catch (e) { _log.debug('certInjection: PEM decode failed — ' + e); }
+            } catch (e) { _failCount++; _log.debug('certInjection: PEM decode failed — ' + e); }
         }
         try {
             var FileInputStream    = Java.use('java.io.FileInputStream');
@@ -2660,7 +2846,7 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
             while ((n = fis.read(buf)) !== -1) baos.write(buf, 0, n);
             fis.close();
             return baos.toByteArray();
-        } catch (e) { _log.debug('certInjection: file read failed — ' + e); }
+        } catch (e) { _failCount++; _log.debug('certInjection: file read failed — ' + e); }
         return null;
     }
 
@@ -2670,7 +2856,7 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
             var BAI = Java.use('java.io.ByteArrayInputStream');
             var cf  = CertFactory.getInstance('X.509');
             return cf.generateCertificate(BAI.$new(derBytes));
-        } catch (e) { _log.debug('certInjection: cert parse — ' + e); return null; }
+        } catch (e) { _failCount++; _log.debug('certInjection: cert parse — ' + e); return null; }
     }
 
     // TrustedCertificateIndex class name variants across Android versions
@@ -2691,6 +2877,7 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                         this.$init();
                         try { this.index(cert); } catch (_) {}
                     };
+                    _hookCount++;
                     _log.ok('certInjection: TrustedCertificateIndex.$init hooked (' + clsName + ')');
                 }
 
@@ -2700,6 +2887,7 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                         this.reset();
                         try { this.index(cert); } catch (_) {}
                     };
+                    _hookCount++;
                     _log.ok('certInjection: TrustedCertificateIndex.reset hooked (' + clsName + ')');
                 }
             } catch (_) {}
@@ -2732,8 +2920,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                 var ctx = SSLContext.getInstance('TLS');
                 ctx.init(null, tmf.getTrustManagers(), null);
                 SSLContext.setDefault(ctx);
+                _hookCount++;
                 _log.ok('certInjection: CA injected into AndroidCAStore + SSLContext');
-            } catch (e) { _log.debug('certInjection: KeyStore injection — ' + e); }
+            } catch (e) { _failCount++; _log.debug('certInjection: KeyStore injection — ' + e); }
 
             // 2. TrustedCertificateIndex hooks
             if (cert) hookTrustedCertificateIndex(cert);
@@ -2755,8 +2944,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                         return this.init(ks_arg);
                     } catch (_) { return this.init(ks_arg); }
                 };
+                _hookCount++;
                 _log.ok('certInjection: TrustManagerFactory.init() wrapped');
-            } catch (e) { _log.debug('certInjection: TrustManagerFactory wrap — ' + e); }
+            } catch (e) { _failCount++; _log.debug('certInjection: TrustManagerFactory wrap — ' + e); }
 
             // 4. WebView — proceed through SSL errors
             try {
@@ -2764,15 +2954,19 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                 WebViewClient.onReceivedSslError.implementation = function (_wv, handler, _err) {
                     handler.proceed();
                 };
+                _hookCount++;
                 _log.ok('certInjection: WebView onReceivedSslError → proceed()');
-            } catch (e) { _log.debug('certInjection: WebView hook — ' + e); }
+            } catch (e) { _failCount++; _log.debug('certInjection: WebView hook — ' + e); }
         });
     })();
 
+    console.log('[*] android-system-certificate-injection: ' + _hookCount + ' hooks installed, ' + _failCount + ' failed');
     _log.ok('android-system-certificate-injection.js loaded');
 })();
+} catch (e) { console.log('[!!!] Module "android-system-certificate-injection" failed to load: ' + e.message); }
 
 // ═══ lib/native-tls-hook.js ═══
+try {
 /**
  * lib/native-tls-hook.js — Native BoringSSL/OpenSSL Hooks
  * RASP Bypass Toolkit — https://github.com/iomoath/RASP_Bypass
@@ -2805,6 +2999,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
     if (typeof BYPASS_BUS !== 'undefined') BYPASS_BUS.registerModule('nativeTls', 'Native BoringSSL/OpenSSL Hooks');
     if (typeof BYPASS_BUS !== 'undefined' && BYPASS_BUS.enabled.nativeTls === false) return;
 
+    var _hookCount = 0;
+    var _failCount = 0;
+
     var TARGET_LIBS = [
         'libboringssl.dylib',
         'libsscronet.so',
@@ -2834,6 +3031,7 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                         args[2] = noop_verify_cb;
                     }
                 });
+                _hookCount++;
                 _log.ok('nativeTls: SSL_CTX_set_custom_verify hooked (' + (libName || 'global') + ')');
             }
         } catch (e) { _log.debug('nativeTls: SSL_CTX_set_custom_verify in ' + libName + ' — ' + e); }
@@ -2847,6 +3045,7 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                         args[2] = noop_verify_cb;
                     }
                 });
+                _hookCount++;
                 _log.ok('nativeTls: SSL_set_custom_verify hooked (' + (libName || 'global') + ')');
             }
         } catch (e) { _log.debug('nativeTls: SSL_set_custom_verify in ' + libName + ' — ' + e); }
@@ -2861,6 +3060,7 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                         args[2] = ptr(0);
                     }
                 });
+                _hookCount++;
                 _log.ok('nativeTls: SSL_CTX_set_cert_verify_callback hooked (' + (libName || 'global') + ')');
             }
         } catch (e) { _log.debug('nativeTls: SSL_CTX_set_cert_verify_callback in ' + libName + ' — ' + e); }
@@ -2872,6 +3072,7 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                 Interceptor.attach(addr4, {
                     onLeave: function (retval) { retval.replace(ptr(0)); }
                 });
+                _hookCount++;
                 _log.ok('nativeTls: SSL_get_verify_result hooked (' + (libName || 'global') + ')');
             }
         } catch (e) { _log.debug('nativeTls: SSL_get_verify_result in ' + libName + ' — ' + e); }
@@ -2908,10 +3109,13 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
         }
     });
 
+    console.log('[*] native-tls-hook: ' + _hookCount + ' hooks installed, ' + _failCount + ' failed');
     _log.ok('native-tls-hook.js loaded');
 })();
+} catch (e) { console.log('[!!!] Module "native-tls-hook" failed to load: ' + e.message); }
 
 // ═══ lib/disable-flutter-tls.js ═══
+try {
 /**
  * lib/disable-flutter-tls.js — Flutter / Dart TLS Bypass
  * RASP Bypass Toolkit — https://github.com/iomoath/RASP_Bypass
@@ -2939,31 +3143,57 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
 
     if (typeof BYPASS_BUS !== 'undefined') BYPASS_BUS.registerModule('flutter', 'Flutter/Dart TLS Bypass');
 
+    var _hookCount = 0;
+    var _failCount = 0;
+
     var _flutterEnabled = (typeof BYPASS_BUS !== 'undefined') ? BYPASS_BUS.enabled.flutter :
                           (_CFG.modules ? _CFG.modules.flutter : true);
     if (_flutterEnabled === false) return;
 
     var ARCH = Process.arch;
 
+    // Patterns from NVISOsecurity/disable-flutter-tls-verification and
+    // httptoolkit/android-disable-flutter-certificate-pinning.js
+    // Covering Flutter v2.0.0 – v3.32.0
     var PATTERNS = {
         arm64: [
+            // Original NVISO patterns
             '60 0? 00 54 ?? ?? ?? ?? ?? ?? 00 94',
             '20 0? 00 54 ?? ?? ?? ?? ?? ?? 00 94',
             'E0 03 00 AA ?? ?? ?? ?? ?? ?? 00 94',
-            '00 00 00 14 ?? ?? ?? ?? ?? ?? 00 94'
+            '00 00 00 14 ?? ?? ?? ?? ?? ?? 00 94',
+            // httptoolkit extended patterns (Flutter 2.x - 3.x)
+            '60 0? 00 54 ?? ?? ?? ?? ?? ?? ?? 94',
+            '20 0? 00 54 ?? ?? ?? ?? ?? ?? ?? 94',
+            'E0 03 00 AA ?? ?? ?? ?? ?? ?? ?? 94',
+            '00 00 00 14 ?? ?? ?? ?? ?? ?? ?? 94',
+            // Flutter 3.x newer build patterns
+            'A0 0? 00 54 ?? ?? ?? ?? ?? ?? 00 94',
+            'C0 0? 00 54 ?? ?? ?? ?? ?? ?? 00 94',
+            '00 01 00 54 ?? ?? ?? ?? ?? ?? 00 94',
+            '00 02 00 54 ?? ?? ?? ?? ?? ?? 00 94'
         ],
         arm: [
             '2D E9 ?? ?? 98 40',
             'F0 B5 03 ?? ?? ?? 01 25',
-            'F0 B5 ?? ?? ?? ?? 01 2? 01 2?'
+            'F0 B5 ?? ?? ?? ?? 01 2? 01 2?',
+            // Additional arm patterns
+            '10 B5 ?? ?? ?? ?? ?? ?? 00 28',
+            '2D E9 F0 4F ?? ?? ?? ?? 4D F8'
         ],
         x64: [
+            // Original patterns
             '74 ?? 48 8? ?? 48 8? ?? E8 ?? ?? ?? ??',
             '75 ?? 48 8? ?? ?? ?? E8 ?? ?? ?? ??',
-            '0F 84 ?? ?? 00 00 E8 ?? ?? ?? ??'
+            '0F 84 ?? ?? 00 00 E8 ?? ?? ?? ??',
+            // Additional x64 patterns for emulator support
+            '74 ?? 48 8B ?? 48 8B ?? FF 1? ?? ?? ?? ??',
+            '0F 85 ?? ?? 00 00 48 8B ?? E8 ?? ?? ?? ??',
+            '74 ?? 48 8B ?? ?? E8 ?? ?? ?? ??'
         ],
         ia32: [
-            '74 ?? 8B ?? 89 ?? E8 ?? ?? ?? ??'
+            '74 ?? 8B ?? 89 ?? E8 ?? ?? ?? ??',
+            '74 ?? 8B ?? E8 ?? ?? ?? ??'
         ]
     };
 
@@ -2992,6 +3222,7 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
             Interceptor.replace(addr, new NativeCallback(function (_ssl) {
                 return 0; // SSL_VERIFY_SUCCESS
             }, 'int', ['pointer']));
+            _hookCount++;
             _log.ok('flutter: ssl_verify_peer_cert replaced @ ' + addr);
             return true;
         } catch (e) {
@@ -3008,7 +3239,7 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                 matches.forEach(function (m) {
                     if (hook_ssl_verify_peer_cert(m.address)) patched++;
                 });
-            } catch (e) { _log.debug('flutter: scan error — ' + e); }
+            } catch (e) { _failCount++; _log.debug('flutter: scan error — ' + e); }
         });
         return patched;
     }
@@ -3029,6 +3260,7 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
         });
 
         if (patched > 0) {
+            _hookCount++;
             _log.ok('flutter: patched via exports (' + patched + ')');
             return;
         }
@@ -3042,6 +3274,7 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
 
         if (flutterModule) {
             patched = findAndPatch(flutterModule.base, flutterModule.size, archPatterns);
+            if (patched > 0) _hookCount++;
             _log.ok('flutter: patched ' + patched + ' via patterns in libflutter.so');
         } else {
             Process.enumerateRanges('r-x').forEach(function (range) {
@@ -3049,6 +3282,7 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     patched += findAndPatch(range.base, range.size, archPatterns);
                 }
             });
+            if (patched > 0) _hookCount++;
             _log.ok('flutter: patched ' + patched + ' via r-x range scan');
         }
     }
@@ -3076,10 +3310,13 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
         setTimeout(retry, RETRY_INTERVAL);
     })();
 
+    console.log('[*] disable-flutter-tls: ' + _hookCount + ' hooks installed, ' + _failCount + ' failed');
     _log.ok('disable-flutter-tls.js loaded');
 })();
+} catch (e) { console.log('[!!!] Module "disable-flutter-tls" failed to load: ' + e.message); }
 
 // ═══ lib/meta-ssl-pinning-bypass.js ═══
+try {
 /**
  * lib/meta-ssl-pinning-bypass.js — Meta Apps SSL Bypass
  * RASP Bypass Toolkit — https://github.com/iomoath/RASP_Bypass
@@ -3110,6 +3347,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
     };
 
     if (typeof BYPASS_BUS !== 'undefined') BYPASS_BUS.registerModule('metaSsl', 'Meta Apps SSL Bypass');
+
+    var _hookCount = 0;
+    var _failCount = 0;
 
     var _metaEnabled = (typeof BYPASS_BUS !== 'undefined') ? BYPASS_BUS.enabled.metaSsl :
                        (_CFG.modules ? _CFG.modules.metaSsl : 'auto');
@@ -3165,6 +3405,7 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                 Interceptor.attach(addr, {
                     onLeave: function (retval) { retval.replace(ptr(1)); }
                 });
+                _hookCount++;
                 _log.ok('metaSsl: proxygen hook ' + sym + ' in ' + libName);
             } catch (e) { _log.debug('metaSsl: proxygen sym ' + sym + ' in ' + libName + ' — ' + e); }
         });
@@ -3189,6 +3430,7 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                         }
                     });
                 }
+                _hookCount++;
                 _log.ok('metaSsl: BoringSSL hook ' + sym + ' in ' + libName);
             } catch (e) { _log.debug('metaSsl: BoringSSL ' + sym + ' in ' + libName + ' — ' + e); }
         });
@@ -3244,10 +3486,13 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
         });
     })();
 
+    console.log('[*] meta-ssl-pinning-bypass: ' + _hookCount + ' hooks installed, ' + _failCount + ' failed');
     _log.ok('meta-ssl-pinning-bypass.js loaded');
 })();
+} catch (e) { console.log('[!!!] Module "meta-ssl-pinning-bypass" failed to load: ' + e.message); }
 
 // ═══ lib/android-proxy-override.js ═══
+try {
 /**
  * lib/android-proxy-override.js — Java Proxy Force Override
  * RASP Bypass Toolkit — https://github.com/iomoath/RASP_Bypass
@@ -3276,6 +3521,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
     if (typeof BYPASS_BUS !== 'undefined') BYPASS_BUS.registerModule('proxyOverride', 'Java Proxy Force Override');
     if (typeof BYPASS_BUS !== 'undefined' && BYPASS_BUS.enabled.proxyOverride === false) return;
 
+    var _hookCount = 0;
+    var _failCount = 0;
+
     var _proxyHost = (typeof PROXY_HOST !== 'undefined') ? PROXY_HOST : (_CFG.proxy ? _CFG.proxy.host : '127.0.0.1');
     var _proxyPort = (typeof PROXY_PORT !== 'undefined') ? PROXY_PORT : (_CFG.proxy ? _CFG.proxy.port : 8080);
     var _proxyType = (_CFG.proxy && _CFG.proxy.type) || 'HTTP';
@@ -3300,8 +3548,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     if (key === 'http.proxyPort'  || key === 'https.proxyPort')  return String(_proxyPort);
                     return this.getProperty(key, def);
                 };
+                _hookCount++;
                 _log.ok('proxyOverride: System.getProperty() proxy override active');
-            } catch (e) { _log.debug('proxyOverride: System.getProperty hook — ' + e); }
+            } catch (e) { _failCount++; _log.debug('proxyOverride: System.getProperty hook — ' + e); }
         });
     })();
 
@@ -3325,8 +3574,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     list.add(proxy);
                     return list;
                 };
+                _hookCount++;
                 _log.ok('proxyOverride: ProxySelector.select() override active');
-            } catch (e) { _log.debug('proxyOverride: ProxySelector hook — ' + e); }
+            } catch (e) { _failCount++; _log.debug('proxyOverride: ProxySelector hook — ' + e); }
         });
     })();
 
@@ -3342,8 +3592,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                 var proxyType = _proxyType === 'SOCKS5' ? ProxyType.SOCKS.value : ProxyType.HTTP.value;
                 var sockAddr  = InetSocketAddr.$new(_proxyHost, _proxyPort);
                 ProxyCls.NO_PROXY.value = ProxyCls.$new(proxyType, sockAddr);
+                _hookCount++;
                 _log.ok('proxyOverride: Proxy.NO_PROXY replaced');
-            } catch (e) { _log.debug('proxyOverride: Proxy.NO_PROXY hook — ' + e); }
+            } catch (e) { _failCount++; _log.debug('proxyOverride: Proxy.NO_PROXY hook — ' + e); }
         });
     })();
 
@@ -3365,8 +3616,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     this.proxy(ourProxy);
                     return this.build();
                 };
+                _hookCount++;
                 _log.ok('proxyOverride: OkHttpClient.Builder.build() proxy injection active');
-            } catch (e) { _log.debug('proxyOverride: OkHttpClient.Builder hook — ' + e); }
+            } catch (e) { _failCount++; _log.debug('proxyOverride: OkHttpClient.Builder hook — ' + e); }
         });
     })();
 
@@ -3381,8 +3633,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     if (name === 'http_proxy' || name === 'global_http_proxy_host') return proxyVal;
                     return this.getString(cr, name);
                 };
+                _hookCount++;
                 _log.ok('proxyOverride: Settings.Global http_proxy spoofing active');
-            } catch (e) { _log.debug('proxyOverride: Settings.Global hook — ' + e); }
+            } catch (e) { _failCount++; _log.debug('proxyOverride: Settings.Global hook — ' + e); }
         });
     })();
 
@@ -3394,15 +3647,19 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                 var NSP = Java.use('android.security.net.config.NetworkSecurityPolicy');
                 NSP.isCleartextTrafficPermitted.overload().implementation = function () { return true; };
                 NSP.isCleartextTrafficPermitted.overload('java.lang.String').implementation = function () { return true; };
+                _hookCount++;
                 _log.ok('proxyOverride: cleartext traffic permitted');
-            } catch (e) { _log.debug('proxyOverride: NSP hook — ' + e); }
+            } catch (e) { _failCount++; _log.debug('proxyOverride: NSP hook — ' + e); }
         });
     })();
 
+    console.log('[*] android-proxy-override: ' + _hookCount + ' hooks installed, ' + _failCount + ' failed');
     _log.ok('android-proxy-override.js loaded');
 })();
+} catch (e) { console.log('[!!!] Module "android-proxy-override" failed to load: ' + e.message); }
 
 // ═══ lib/native-connect-hook.js ═══
+try {
 /**
  * lib/native-connect-hook.js — Native connect() Redirect
  * RASP Bypass Toolkit — https://github.com/iomoath/RASP_Bypass
@@ -3435,8 +3692,11 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
     if (typeof BYPASS_BUS !== 'undefined') BYPASS_BUS.registerModule('nativeConnect', 'Native connect() Redirect');
     if (typeof BYPASS_BUS !== 'undefined' && BYPASS_BUS.enabled.nativeConnect === false) return;
 
-    var _proxyHost = (typeof PROXY_HOST !== 'undefined') ? PROXY_HOST : (_CFG.proxy ? _CFG.proxy.host : '127.0.0.1');
-    var _proxyPort = (typeof PROXY_PORT !== 'undefined') ? PROXY_PORT : (_CFG.proxy ? _CFG.proxy.port : 8080);
+    var _hookCount = 0;
+    var _failCount = 0;
+
+    var _PROXY_HOST = (_CFG && _CFG.proxy && _CFG.proxy.host) || (typeof PROXY_HOST !== 'undefined' ? PROXY_HOST : '127.0.0.1');
+    var _PROXY_PORT = (_CFG && _CFG.proxy && _CFG.proxy.port) || (typeof PROXY_PORT !== 'undefined' ? PROXY_PORT : 8080);
     var _socks5    = (typeof PROXY_SUPPORTS_SOCKS5 !== 'undefined') ? PROXY_SUPPORTS_SOCKS5 :
                      (_CFG.PROXY_SUPPORTS_SOCKS5 || false);
     var _ignoredPorts = (typeof IGNORED_NON_HTTP_PORTS !== 'undefined') ? IGNORED_NON_HTTP_PORTS :
@@ -3475,12 +3735,12 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
     function rewriteSockaddrToProxy(sa, addrLen) {
         try {
             // Parse proxy host IP to bytes
-            var parts = _proxyHost.split('.');
+            var parts = _PROXY_HOST.split('.');
             if (parts.length !== 4) return false; // IPv6 proxy not supported in simple mode
             // Rewrite as AF_INET sockaddr pointing to proxy
             sa.writeU16(AF_INET); // sa_family = AF_INET
-            sa.add(2).writeU8((_proxyPort >> 8) & 0xFF);
-            sa.add(3).writeU8(_proxyPort & 0xFF);
+            sa.add(2).writeU8((_PROXY_PORT >> 8) & 0xFF);
+            sa.add(3).writeU8(_PROXY_PORT & 0xFF);
             sa.add(4).writeU8(parseInt(parts[0]));
             sa.add(5).writeU8(parseInt(parts[1]));
             sa.add(6).writeU8(parseInt(parts[2]));
@@ -3519,20 +3779,24 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                         if (shouldRedirect) {
                             if (rewriteSockaddrToProxy(sa, this._addrLen)) {
                                 this._redirect = true;
-                                _log.debug('nativeConnect: redirected port ' + parsed.port + ' → proxy ' + _proxyHost + ':' + _proxyPort);
+                                _log.debug('nativeConnect: redirected port ' + parsed.port + ' → proxy ' + _PROXY_HOST + ':' + _PROXY_PORT);
                             }
                         }
                     } catch (_) {}
                 }
             });
-            _log.ok('nativeConnect: connect() proxy redirect active → ' + _proxyHost + ':' + _proxyPort);
-        } catch (e) { _log.debug('nativeConnect: connect hook — ' + e); }
+            _hookCount++;
+            _log.ok('nativeConnect: connect() proxy redirect active → ' + _PROXY_HOST + ':' + _PROXY_PORT);
+        } catch (e) { _failCount++; _log.debug('nativeConnect: connect hook — ' + e); }
     })();
 
+    console.log('[*] native-connect-hook: ' + _hookCount + ' hooks installed, ' + _failCount + ' failed');
     _log.ok('native-connect-hook.js loaded');
 })();
+} catch (e) { console.log('[!!!] Module "native-connect-hook" failed to load: ' + e.message); }
 
 // ═══ lib/integrity-bypass.js ═══
+try {
 /**
  * lib/integrity-bypass.js — Signature / Tampering / Anti-Kill Bypass
  * RASP Bypass Toolkit — https://github.com/iomoath/RASP_Bypass
@@ -3560,6 +3824,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
 
     if (typeof BYPASS_BUS !== 'undefined') BYPASS_BUS.registerModule('integrity', 'Signature/Tampering/Anti-Kill');
     if (typeof BYPASS_BUS !== 'undefined' && BYPASS_BUS.enabled.integrity === false) return;
+
+    var _hookCount = 0;
+    var _failCount = 0;
 
     var ORIGINAL_INSTALLER = _CFG.originalInstaller || 'com.android.vending';
 
@@ -3589,8 +3856,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     }
                     return pi;
                 };
+                _hookCount++;
                 _log.ok('integrity: PackageManager.getPackageInfo() signature caching active');
-            } catch (e) { _log.debug('integrity: getPackageInfo hook — ' + e); }
+            } catch (e) { _failCount++; _log.debug('integrity: getPackageInfo hook — ' + e); }
         });
     })();
 
@@ -3608,8 +3876,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     if (_cachedSigStr !== null) return _cachedSigStr;
                     return this.toCharsString();
                 };
+                _hookCount++;
                 _log.ok('integrity: Signature hooks active');
-            } catch (e) { _log.debug('integrity: Signature hook — ' + e); }
+            } catch (e) { _failCount++; _log.debug('integrity: Signature hook — ' + e); }
         });
     })();
 
@@ -3626,8 +3895,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     if (!_cache[algo]) _cache[algo] = result;
                     return _cache[algo];
                 };
+                _hookCount++;
                 _log.ok('integrity: MessageDigest.digest() caching active');
-            } catch (e) { _log.debug('integrity: MessageDigest hook — ' + e); }
+            } catch (e) { _failCount++; _log.debug('integrity: MessageDigest hook — ' + e); }
         });
     })();
 
@@ -3643,8 +3913,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     if (_crc_cache === null) _crc_cache = val;
                     return _crc_cache;
                 };
+                _hookCount++;
                 _log.ok('integrity: CRC32.getValue() caching active');
-            } catch (e) { _log.debug('integrity: CRC32 hook — ' + e); }
+            } catch (e) { _failCount++; _log.debug('integrity: CRC32 hook — ' + e); }
         });
     })();
 
@@ -3658,7 +3929,7 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     return ORIGINAL_INSTALLER;
                 };
                 _log.ok('integrity: getInstallerPackageName() → ' + ORIGINAL_INSTALLER);
-            } catch (e) { _log.debug('integrity: getInstallerPackageName hook — ' + e); }
+            } catch (e) { _failCount++; _log.debug('integrity: getInstallerPackageName hook — ' + e); }
 
             try {
                 var PM2 = Java.use('android.app.ApplicationPackageManager');
@@ -3672,7 +3943,7 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     } catch (_) { return info; }
                 };
                 _log.ok('integrity: getInstallSourceInfo() → Play Store');
-            } catch (e) { _log.debug('integrity: getInstallSourceInfo hook — ' + e); }
+            } catch (e) { _failCount++; _log.debug('integrity: getInstallSourceInfo hook — ' + e); }
         });
     })();
 
@@ -3697,8 +3968,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     method.implementation = function () {
                         _log.info('integrity: blocked ' + entry.cls + '.' + entry.method + '()');
                     };
-                } catch (e) { _log.debug('integrity: anti-termination ' + entry.method + ' — ' + e); }
+                } catch (e) { _failCount++; _log.debug('integrity: anti-termination ' + entry.method + ' — ' + e); }
             });
+            _hookCount++;
             _log.ok('integrity: anti-termination hooks active');
         });
     })();
@@ -3711,13 +3983,16 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
             Interceptor.attach(sha256FinalPtr, {
                 onLeave: function () { _log.debug('integrity: SHA256_Final called'); }
             });
-        } catch (e) { _log.debug('integrity: native hash monitor — ' + e); }
+        } catch (e) { _failCount++; _log.debug('integrity: native hash monitor — ' + e); }
     })();
 
+    console.log('[*] integrity-bypass: ' + _hookCount + ' hooks installed, ' + _failCount + ' failed');
     _log.ok('integrity-bypass.js loaded');
 })();
+} catch (e) { console.log('[!!!] Module "integrity-bypass" failed to load: ' + e.message); }
 
 // ═══ lib/attestation-bypass.js ═══
+try {
 /**
  * lib/attestation-bypass.js — SafetyNet / Play Integrity Spoofing
  * RASP Bypass Toolkit — https://github.com/iomoath/RASP_Bypass
@@ -3748,6 +4023,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
 
     if (typeof BYPASS_BUS !== 'undefined') BYPASS_BUS.registerModule('attestation', 'SafetyNet/Play Integrity Spoofing');
     if (typeof BYPASS_BUS !== 'undefined' && BYPASS_BUS.enabled.attestation === false) return;
+
+    var _hookCount = 0;
+    var _failCount = 0;
 
     var BOOT_PROPS = {
         'ro.boot.verifiedbootstate'      : 'green',
@@ -3788,8 +4066,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     }
                 }
             });
+            _hookCount++;
             _log.ok('attestation: __system_property_get boot properties spoofed');
-        } catch (e) { _log.debug('attestation: __system_property_get hook — ' + e); }
+        } catch (e) { _failCount++; _log.debug('attestation: __system_property_get hook — ' + e); }
     })();
 
     // 2. Java SystemProperties
@@ -3810,8 +4089,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     if (BOOT_PROPS[key] !== undefined) return BOOT_PROPS[key] === '1' || BOOT_PROPS[key] === true;
                     return this.getBoolean(key, def);
                 };
+                _hookCount++;
                 _log.ok('attestation: Java SystemProperties spoofed');
-            } catch (e) { _log.debug('attestation: Java SystemProperties hook — ' + e); }
+            } catch (e) { _failCount++; _log.debug('attestation: Java SystemProperties hook — ' + e); }
         });
     })();
 
@@ -3823,8 +4103,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                 var Build = Java.use('android.os.Build');
                 Build.TAGS.value = 'release-keys';
                 Build.TYPE.value = 'user';
+                _hookCount++;
                 _log.ok('attestation: Build.TAGS/TYPE spoofed');
-            } catch (e) { _log.debug('attestation: Build fields — ' + e); }
+            } catch (e) { _failCount++; _log.debug('attestation: Build fields — ' + e); }
         });
     })();
 
@@ -3847,6 +4128,7 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     }
                 } catch (_) {}
             });
+            _hookCount++;
             _log.ok('attestation: SafetyNet hooks applied');
         });
     })();
@@ -3861,8 +4143,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     _log.info('attestation: Play Integrity requestIntegrityToken() intercepted');
                     return this.requestIntegrityToken(request);
                 };
+                _hookCount++;
                 _log.ok('attestation: Play Integrity hook applied');
-            } catch (e) { _log.debug('attestation: Play Integrity — ' + e); }
+            } catch (e) { _failCount++; _log.debug('attestation: Play Integrity — ' + e); }
         });
     })();
 
@@ -3879,8 +4162,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     }
                 }
             });
+            _hookCount++;
             _log.ok('attestation: DroidGuard dlopen monitoring active');
-        } catch (e) { _log.debug('attestation: DroidGuard dlopen hook — ' + e); }
+        } catch (e) { _failCount++; _log.debug('attestation: DroidGuard dlopen hook — ' + e); }
     })();
 
     // 7. /proc/cmdline filtering — hide bootloader unlock state
@@ -3921,14 +4205,18 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     } catch (_) {}
                 }
             });
+            _hookCount++;
             _log.ok('attestation: /proc/cmdline boot state filtering active');
-        } catch (e) { _log.debug('attestation: cmdline hook — ' + e); }
+        } catch (e) { _failCount++; _log.debug('attestation: cmdline hook — ' + e); }
     })();
 
+    console.log('[*] attestation-bypass: ' + _hookCount + ' hooks installed, ' + _failCount + ' failed');
     _log.ok('attestation-bypass.js loaded');
 })();
+} catch (e) { console.log('[!!!] Module "attestation-bypass" failed to load: ' + e.message); }
 
 // ═══ lib/http3-disable.js ═══
+try {
 /**
  * lib/http3-disable.js — HTTP/3 QUIC Blocking
  * RASP Bypass Toolkit — https://github.com/iomoath/RASP_Bypass
@@ -3960,6 +4248,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
 
     if (typeof BYPASS_BUS !== 'undefined') BYPASS_BUS.registerModule('http3Disable', 'HTTP/3 QUIC Blocking');
     if (typeof BYPASS_BUS !== 'undefined' && BYPASS_BUS.enabled.http3Disable === false) return;
+
+    var _hookCount = 0;
+    var _failCount = 0;
 
     if (_CFG.BLOCK_HTTP3 === false) {
         _log.debug('http3Disable: BLOCK_HTTP3=false, skipping');
@@ -3995,7 +4286,8 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     }
                 }
             });
-        } catch (e) { _log.debug('http3Disable: socket hook — ' + e); }
+            _hookCount++;
+        } catch (e) { _failCount++; _log.debug('http3Disable: socket hook — ' + e); }
     })();
 
     // 2. connect() — block UDP connects on port 443 (QUIC)
@@ -4021,8 +4313,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     }
                 }
             });
+            _hookCount++;
             _log.ok('http3Disable: connect() UDP/443 QUIC blocking active');
-        } catch (e) { _log.debug('http3Disable: connect hook — ' + e); }
+        } catch (e) { _failCount++; _log.debug('http3Disable: connect hook — ' + e); }
     })();
 
     // 3. sendto() — block UDP sends on port 443
@@ -4046,8 +4339,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     if (this._blockQuic) retval.replace(ptr(-ECONNREFUSED));
                 }
             });
+            _hookCount++;
             _log.ok('http3Disable: sendto() UDP/443 QUIC blocking active');
-        } catch (e) { _log.debug('http3Disable: sendto hook — ' + e); }
+        } catch (e) { _failCount++; _log.debug('http3Disable: sendto hook — ' + e); }
     })();
 
     // 4. setsockopt() — block IPPROTO_QUIC socket options
@@ -4065,7 +4359,8 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     if (this._blockQuic) retval.replace(ptr(-1));
                 }
             });
-        } catch (e) { _log.debug('http3Disable: setsockopt hook — ' + e); }
+            _hookCount++;
+        } catch (e) { _failCount++; _log.debug('http3Disable: setsockopt hook — ' + e); }
     })();
 
     // 5. Java: OkHttpClient.Builder.protocols() — filter out HTTP/3
@@ -4089,15 +4384,19 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     }
                     return this.protocols(filtered);
                 };
+                _hookCount++;
                 _log.ok('http3Disable: OkHttp HTTP/3 protocol filtering active');
-            } catch (e) { _log.debug('http3Disable: OkHttp protocols hook — ' + e); }
+            } catch (e) { _failCount++; _log.debug('http3Disable: OkHttp protocols hook — ' + e); }
         });
     })();
 
+    console.log('[*] http3-disable: ' + _hookCount + ' hooks installed, ' + _failCount + ' failed');
     _log.ok('http3-disable.js loaded');
 })();
+} catch (e) { console.log('[!!!] Module "http3-disable" failed to load: ' + e.message); }
 
 // ═══ lib/syscall-bypass.js ═══
+try {
 /**
  * lib/syscall-bypass.js — ARM64 Syscall-Level Bypass
  * RASP Bypass Toolkit — https://github.com/iomoath/RASP_Bypass
@@ -4129,6 +4428,18 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
 
     if (typeof BYPASS_BUS !== 'undefined') BYPASS_BUS.registerModule('syscall', 'ARM64 Syscall-Level Bypass');
     if (typeof BYPASS_BUS !== 'undefined' && BYPASS_BUS.enabled.syscall === false) return;
+
+    var _hookCount = 0;
+    var _failCount = 0;
+
+    if (Process.arch !== 'arm64') {
+        _log.info('syscall-bypass: skipped — ARM64 only (current arch: ' + Process.arch + ')');
+        if (!_STANDALONE && typeof BYPASS_BUS !== 'undefined') {
+            BYPASS_BUS.emit && BYPASS_BUS.emit('syscall', { ok: false, reason: 'unsupported-arch' });
+        }
+        console.log('[*] syscall-bypass: 0 hooks installed, 0 failed');
+        return;
+    }
 
     // ARM64 syscall numbers
     var SYS_openat = 56;
@@ -4167,8 +4478,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     if (this._isStatus) _statusFds[fd] = true;
                 }
             });
+            _hookCount++;
             _log.ok('syscall: openat() FD tracking active');
-        } catch (e) { _log.debug('syscall: openat hook — ' + e); }
+        } catch (e) { _failCount++; _log.debug('syscall: openat hook — ' + e); }
     })();
 
     // 2. Hook read() to filter content of tracked FDs
@@ -4222,8 +4534,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     }
                 }
             });
+            _hookCount++;
             _log.ok('syscall: read() content filtering active');
-        } catch (e) { _log.debug('syscall: read hook — ' + e); }
+        } catch (e) { _failCount++; _log.debug('syscall: read hook — ' + e); }
     })();
 
     // 3. Hook close() to clean up tracked FDs
@@ -4239,13 +4552,17 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     delete _statusFds[fd];
                 }
             });
-        } catch (e) { _log.debug('syscall: close hook — ' + e); }
+            _hookCount++;
+        } catch (e) { _failCount++; _log.debug('syscall: close hook — ' + e); }
     })();
 
+    console.log('[*] syscall-bypass: ' + _hookCount + ' hooks installed, ' + _failCount + ' failed');
     _log.ok('syscall-bypass.js loaded');
 })();
+} catch (e) { console.log('[!!!] Module "syscall-bypass" failed to load: ' + e.message); }
 
 // ═══ lib/anti-frida-bypass.js ═══
+try {
 /**
  * lib/anti-frida-bypass.js — Syscall-Level Frida Hiding
  * RASP Bypass Toolkit — https://github.com/iomoath/RASP_Bypass
@@ -4277,6 +4594,18 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
 
     if (typeof BYPASS_BUS !== 'undefined') BYPASS_BUS.registerModule('antiFrida', 'Syscall-Level Frida Hiding');
     if (typeof BYPASS_BUS !== 'undefined' && BYPASS_BUS.enabled.antiFrida === false) return;
+
+    var _hookCount = 0;
+    var _failCount = 0;
+
+    if (Process.arch !== 'arm64') {
+        _log.info('anti-frida-bypass: skipped — ARM64 only (current arch: ' + Process.arch + ')');
+        if (!_STANDALONE && typeof BYPASS_BUS !== 'undefined') {
+            BYPASS_BUS.emit && BYPASS_BUS.emit('antiFrida', { ok: false, reason: 'unsupported-arch' });
+        }
+        console.log('[*] anti-frida-bypass: 0 hooks installed, 0 failed');
+        return;
+    }
 
     var FRIDA_MARKERS = [
         'frida', 'gum-js-loop', 'gmain', 'gdbus',
@@ -4323,8 +4652,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     if (this._isTask)    _taskFds[fd]    = true;
                 }
             });
+            _hookCount++;
             _log.ok('antiFrida: openat() FD tracking active');
-        } catch (e) { _log.debug('antiFrida: openat hook — ' + e); }
+        } catch (e) { _failCount++; _log.debug('antiFrida: openat hook — ' + e); }
     })();
 
     // 2. read — filter content of all tracked FDs
@@ -4378,8 +4708,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     }
                 }
             });
+            _hookCount++;
             _log.ok('antiFrida: read() content filtering active');
-        } catch (e) { _log.debug('antiFrida: read hook — ' + e); }
+        } catch (e) { _failCount++; _log.debug('antiFrida: read hook — ' + e); }
     })();
 
     // 3. readlinkat — intercept /proc/self/exe and fd symlinks
@@ -4408,8 +4739,9 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     } catch (_) {}
                 }
             });
+            _hookCount++;
             _log.ok('antiFrida: readlinkat() Frida symlink masking active');
-        } catch (e) { _log.debug('antiFrida: readlinkat hook — ' + e); }
+        } catch (e) { _failCount++; _log.debug('antiFrida: readlinkat hook — ' + e); }
     })();
 
     // 4. close — cleanup tracked FDs
@@ -4426,7 +4758,8 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     delete _taskFds[fd];
                 }
             });
-        } catch (e) { _log.debug('antiFrida: close hook — ' + e); }
+            _hookCount++;
+        } catch (e) { _failCount++; _log.debug('antiFrida: close hook — ' + e); }
     })();
 
     // 5. Thread name hiding via prctl
@@ -4444,15 +4777,17 @@ if (BYPASS_CONFIG.modules.flutter === 'auto') {
                     }
                 }
             });
+            _hookCount++;
             _log.ok('antiFrida: prctl thread name masking active');
-        } catch (e) { _log.debug('antiFrida: prctl hook — ' + e); }
+        } catch (e) { _failCount++; _log.debug('antiFrida: prctl hook — ' + e); }
     })();
 
+    console.log('[*] anti-frida-bypass: ' + _hookCount + ' hooks installed, ' + _failCount + ' failed');
     _log.ok('anti-frida-bypass.js loaded');
 })();
+} catch (e) { console.log('[!!!] Module "anti-frida-bypass" failed to load: ' + e.message); }
 
 
-// ─────────────────────────────────────────────────────────────────────────
 // REPL helpers
 // ─────────────────────────────────────────────────────────────────────────
 function bypassStatus()  { BYPASS_BUS.status(); }
