@@ -13,20 +13,26 @@
 ## Quick Start
 
 ```bash
-# Single-file mode — bypass everything with one command
+# Standalone module usage
+frida -U -f com.target.app -l lib/android-ssl-pinning-bypass.js --no-pause
+
+# Modular with specific modules
+frida -U -f com.target.app \
+  -l lib/utils.js \
+  -l lib/stealth-frida-hiding.js \
+  -l lib/android-ssl-pinning-bypass.js \
+  --no-pause
+
+# All-in-one unified loader
 frida -U -f com.target.app -l bypass.js --no-pause
 
-# Modular mode — load specific modules via orchestrator
+# With config orchestrator
 frida -U -f com.target.app -l config.js --no-pause
 
-# Banking app profile
-frida -U -f com.bank.app -l profiles/banking.js --no-pause
-
-# Flutter app profile
-frida -U -f com.flutter.app -l profiles/flutter.js --no-pause
-
-# Meta apps (Facebook / Instagram / WhatsApp)
-frida -U -f com.facebook.katana -l profiles/meta.js --no-pause
+# Profile usage
+frida -U -f com.bank.app -l config.js -l profiles/banking.js --no-pause
+frida -U -f com.instagram.android -l config.js -l profiles/meta.js --no-pause
+frida -U -f com.flutter.app -l config.js -l profiles/flutter.js --no-pause
 ```
 
 ---
@@ -35,26 +41,40 @@ frida -U -f com.facebook.katana -l profiles/meta.js --no-pause
 
 ```
 RASP_Bypass/
-├── bypass.js                        # Single-file unified loader (all-in-one)
-├── config.js                        # Orchestrator — loads modules selectively
+├── README.md
+├── CHECKLIST.md
+├── config.js
+├── bypass.js
 ├── lib/
-│   ├── utils.js                     # Shared utilities (BYPASS_UTILS global)
-│   ├── 00_stealth.js                # Anti-detection foundation  [LOAD FIRST]
-│   ├── 01_root_bypass.js            # Root/Magisk/KernelSU hiding
-│   ├── 02_frida_bypass.js           # Frida artifact elimination
-│   ├── 03_debugger_bypass.js        # Debugger/ptrace neutralization
-│   ├── 04_hook_detection.js         # Hook detection countermeasures
-│   ├── 05_ssl_bypass.js             # Universal SSL unpinning (20+ libs)
-│   ├── 06_ssl_flutter.js            # Flutter/BoringSSL specific
-│   ├── 07_ssl_ca_inject.js          # System CA certificate injection
-│   ├── 08_proxy_override.js         # Force proxy at all layers
-│   ├── 09_integrity_bypass.js       # Signature/tampering/anti-kill
-│   ├── 10_env_bypass.js             # Emulator/VPN/DevMode/Accessibility
-│   └── 11_attestation.js            # SafetyNet/Play Integrity spoofing
+│   ├── utils.js
+│   ├── stealth-frida-hiding.js
+│   ├── stealth-hook-detection.js
+│   ├── root-detection-bypass.js
+│   ├── frida-detection-bypass.js
+│   ├── debugger-detection-bypass.js
+│   ├── emulator-detection-bypass.js
+│   ├── vpn-detection-bypass.js
+│   ├── developer-mode-bypass.js
+│   ├── accessibility-bypass.js
+│   ├── screen-capture-bypass.js
+│   ├── app-cloning-bypass.js
+│   ├── android-ssl-pinning-bypass.js
+│   ├── android-ssl-pinning-bypass-fallback.js
+│   ├── android-system-certificate-injection.js
+│   ├── native-tls-hook.js
+│   ├── disable-flutter-tls.js
+│   ├── meta-ssl-pinning-bypass.js
+│   ├── android-proxy-override.js
+│   ├── native-connect-hook.js
+│   ├── integrity-bypass.js
+│   ├── attestation-bypass.js
+│   ├── http3-disable.js
+│   ├── syscall-bypass.js
+│   └── anti-frida-bypass.js
 └── profiles/
-    ├── banking.js                   # Banking apps (max stealth)
-    ├── flutter.js                   # Flutter apps
-    └── meta.js                      # Meta apps (FB/IG/Messenger/WA)
+    ├── banking.js
+    ├── flutter.js
+    └── meta.js
 ```
 
 ### Two Operational Modes
@@ -66,22 +86,34 @@ RASP_Bypass/
 
 ---
 
-## Module Descriptions
+## Module Reference
 
-| Module | Key | Description |
-|--------|-----|-------------|
-| `00_stealth.js` | `stealth` | `/proc/self/maps` filtering, thread name masking, port 27042 block, D-Bus filtering, dlopen filtering, inotify suppression |
-| `01_root_bypass.js` | `root` | 30+ su path hiding, RootBeer hooks, Build property spoofing, Magisk/KernelSU artifact hiding, PM package hiding |
-| `02_frida_bypass.js` | `frida` | Extends stealth: maps string matching, dl_iterate_phdr filter, Class.forName block, process_vm_readv defeat |
-| `03_debugger_bypass.js` | `debugger` | ptrace PTRACE_TRACEME→0, TracerPid filter, prctl dumpable, JDWP suppression, Debug.isDebuggerConnected→false |
-| `04_hook_detection.js` | `hookDetect` | Stack trace Frida frame removal, dladdr GOT/PLT spoofing, RASP telemetry suppression, anti-kill no-ops |
-| `05_ssl_bypass.js` | `ssl` | 20+ pinning library hooks, BoringSSL native hooks, auto-fallback exception patcher, Meta proxygen |
-| `06_ssl_flutter.js` | `flutter` | Export-based + multi-arch byte pattern scanning (ARM64/ARM/x64/x86), Interceptor.replace NativeCallback |
-| `07_ssl_ca_inject.js` | `caInject` | KeyStore injection, TrustManagerFactory wrap, WebView onReceivedSslError→proceed, SSL_CTX_load_verify_locations |
-| `08_proxy_override.js` | `proxy` | System.getProperty, ProxySelector, Proxy.NO_PROXY, OkHttpClient.Builder, Settings.Global, cleartext permitted |
-| `09_integrity_bypass.js` | `integrity` | Signature caching, CRC32/MessageDigest hooks, installer spoofing, anti-kill (System.exit/Process.killProcess/…) |
-| `10_env_bypass.js` | `environment` | Build.* spoofing, TelephonyManager IMEI, emulator file hiding, VPN NI filter, dev mode settings, accessibility hiding, FLAG_SECURE bypass |
-| `11_attestation.js` | `attestation` | 50+ boot property spoofing, SafetyNet/Play Integrity hooks, DroidGuard dlopen monitoring, /proc/cmdline filtering |
+| Module File | ID | Description | Source |
+|---|---|---|---|
+| `stealth-frida-hiding.js` | `stealthFrida` | Frida OS-Level Hiding | RASP_auditor m03 |
+| `stealth-hook-detection.js` | `stealthHook` | Hook Detection Countermeasures | RASP_auditor m10 |
+| `root-detection-bypass.js` | `root` | Root/Magisk/KernelSU Hiding | httptoolkit + m02 |
+| `frida-detection-bypass.js` | `frida` | App-Level Frida Detection Defeat | RASP_auditor m03 |
+| `debugger-detection-bypass.js` | `debugger` | Debugger/ptrace Neutralization | RASP_auditor m04 |
+| `emulator-detection-bypass.js` | `emulator` | Emulator Detection Bypass | RASP_auditor m08 |
+| `vpn-detection-bypass.js` | `vpn` | VPN Detection Bypass | RASP_auditor m11 |
+| `developer-mode-bypass.js` | `devMode` | Developer Mode Hiding | RASP_auditor m05 |
+| `accessibility-bypass.js` | `accessibility` | Accessibility Service Hiding | RASP_auditor m14 |
+| `screen-capture-bypass.js` | `screenCapture` | Screen Capture / FLAG_SECURE Bypass | RASP_auditor m16 |
+| `app-cloning-bypass.js` | `appCloning` | App Cloning Detection Bypass | RASP_auditor m17 |
+| `android-ssl-pinning-bypass.js` | `sslPinning` | Java SSL Unpinning (20+ libs) | httptoolkit (Tim Perry, AGPL-3.0) |
+| `android-ssl-pinning-bypass-fallback.js` | `sslFallback` | Auto-Fallback SSL Patcher | httptoolkit (Tim Perry, AGPL-3.0) |
+| `android-system-certificate-injection.js` | `certInjection` | System CA Certificate Injection | httptoolkit (Tim Perry, AGPL-3.0) |
+| `native-tls-hook.js` | `nativeTls` | Native BoringSSL/OpenSSL Hooks | httptoolkit (Tim Perry, AGPL-3.0) |
+| `disable-flutter-tls.js` | `flutter` | Flutter/Dart TLS Bypass | NVISOsecurity |
+| `meta-ssl-pinning-bypass.js` | `metaSsl` | Meta Apps SSL Bypass | iomoath/meta-apps-ssl-pinning |
+| `android-proxy-override.js` | `proxyOverride` | Java Proxy Force Override | httptoolkit (Tim Perry, AGPL-3.0) |
+| `native-connect-hook.js` | `nativeConnect` | Native connect() Redirect | httptoolkit (Tim Perry, AGPL-3.0) |
+| `integrity-bypass.js` | `integrity` | Signature/Tampering/Anti-Kill | RASP_auditor m09 |
+| `attestation-bypass.js` | `attestation` | SafetyNet/Play Integrity Spoofing | RASP_auditor m18,24 |
+| `http3-disable.js` | `http3Disable` | HTTP/3 QUIC Blocking | iomoath/meta-apps-ssl-pinning |
+| `syscall-bypass.js` | `syscall` | ARM64 Syscall-Level Bypass | iomoath/meta-apps-ssl-pinning |
+| `anti-frida-bypass.js` | `antiFrida` | Syscall-Level Frida Hiding | iomoath/meta-apps-ssl-pinning |
 
 ---
 
