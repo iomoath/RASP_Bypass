@@ -13,26 +13,23 @@
 ## Quick Start
 
 ```bash
-# Standalone module usage
-frida -U -f com.target.app -l lib/android-ssl-pinning-bypass.js --no-pause
+# Single-file mode — easiest, all modules inline
+frida -U -f com.target.app -l bypass.js
 
-# Modular with specific modules
+# Modular mode — use run.sh to auto-generate the full command
+bash run.sh com.target.app
+
+# Modular mode — manual (config.js + individual modules)
 frida -U -f com.target.app \
+  -l config.js \
   -l lib/utils.js \
   -l lib/stealth-frida-hiding.js \
-  -l lib/android-ssl-pinning-bypass.js \
-  --no-pause
+  -l lib/android-ssl-pinning-bypass.js
 
-# All-in-one unified loader
-frida -U -f com.target.app -l bypass.js --no-pause
-
-# With config orchestrator
-frida -U -f com.target.app -l config.js --no-pause
-
-# Profile usage
-frida -U -f com.bank.app -l config.js -l profiles/banking.js --no-pause
-frida -U -f com.instagram.android -l config.js -l profiles/meta.js --no-pause
-frida -U -f com.flutter.app -l config.js -l profiles/flutter.js --no-pause
+# With a profile (banking, meta, flutter)
+bash run.sh com.bank.app spawn banking
+bash run.sh com.instagram.android spawn meta
+bash run.sh com.flutter.app spawn flutter
 ```
 
 ---
@@ -43,8 +40,9 @@ frida -U -f com.flutter.app -l config.js -l profiles/flutter.js --no-pause
 RASP_Bypass/
 ├── README.md
 ├── CHECKLIST.md
-├── config.js
-├── bypass.js
+├── config.js          ← set BYPASS_CONFIG here; load before lib/*.js
+├── bypass.js          ← all-in-one single-file alternative
+├── run.sh             ← helper: auto-generate frida command with all -l flags
 ├── lib/
 │   ├── utils.js
 │   ├── stealth-frida-hiding.js
@@ -81,8 +79,12 @@ RASP_Bypass/
 
 | Mode | Command | Description |
 |------|---------|-------------|
-| **Single-file** | `frida … -l bypass.js` | All modules in one file, zero external deps |
-| **Modular** | `frida … -l config.js` | Selective module loading via orchestrator |
+| **Single-file** | `frida … -l bypass.js` | All 24 modules inline, zero external deps |
+| **Modular** | `bash run.sh <pkg>` or manual `-l` flags | Selective module loading; `config.js` sets globals |
+
+> **Note:** Frida does not support `require()`. In modular mode each `lib/*.js` file must be
+> passed as a separate `-l` flag (or use `run.sh` which does this automatically).
+> `bypass.js` is the recommended single-step option.
 
 ---
 
@@ -128,25 +130,34 @@ var BYPASS_CONFIG = {
         port: 8080,           // MitM proxy port
         type: 'HTTP'          // 'HTTP' or 'SOCKS5'
     },
-    ca: {
-        inject   : true,
-        certPath : '/data/local/tmp/burp.crt',  // DER or PEM CA cert on device
-        certBase64: null,                        // base64 DER alternative
-        asSystem : false
-    },
+    CERT_PEM: '-----BEGIN CERTIFICATE-----\n...\n-----END CERTIFICATE-----',
+    forceProxy: true,         // Set to false to skip system proxy override
+                              // (useful when using a transparent proxy or VPN)
     modules: {
-        stealth      : true,
-        root         : true,
-        frida        : true,
-        debugger     : true,
-        hookDetect   : true,
-        ssl          : true,
-        flutter      : 'auto',  // auto-detected
-        caInject     : true,
-        proxy        : true,
-        integrity    : true,
-        environment  : true,
-        attestation  : true
+        stealthFrida  : true,
+        stealthHook   : true,
+        root          : true,
+        frida         : true,
+        debugger      : true,
+        emulator      : true,
+        vpn           : true,
+        devMode       : true,
+        accessibility : true,
+        screenCapture : true,
+        appCloning    : true,
+        sslPinning    : true,
+        sslFallback   : true,
+        certInjection : true,
+        nativeTls     : true,
+        flutter       : 'auto',  // auto-detected via libflutter.so
+        metaSsl       : 'auto',
+        proxyOverride : true,
+        nativeConnect : true,
+        integrity     : true,
+        attestation   : true,
+        http3Disable  : true,
+        syscall       : true,
+        antiFrida     : true
     },
     silent: true,    // zero output in production
     debug : false,   // verbose debug logging
@@ -161,28 +172,47 @@ var BYPASS_CONFIG = {
 |-------|---------|
 | `true` | Always enable |
 | `false` | Always disable |
-| `'auto'` | Auto-detect at runtime (Flutter only) |
+| `'auto'` | Auto-detect at runtime (Flutter, MetaSSL) |
+
+### `forceProxy` Option
+
+When `forceProxy: false`, the `android-proxy-override` module registers itself but performs no hooks. Use this when traffic capture is handled by a transparent proxy or VPN-based interception and you do not want the app's proxy settings overridden.
 
 ---
 
 ## Usage Examples
 
-### Selective module loading
+### Quick launch with run.sh
+```bash
+# Spawn mode (all modules)
+bash run.sh com.target.app
+
+# Attach to running process
+bash run.sh com.target.app attach
+
+# Spawn with a profile
+bash run.sh com.bank.app spawn banking
+bash run.sh com.instagram.android spawn meta
+bash run.sh com.flutter.app spawn flutter
+```
+
+### Manual selective module loading
 ```bash
 # SSL only — quick traffic interception
 frida -U -f com.target.app \
+  -l config.js \
   -l lib/utils.js \
-  -l lib/00_stealth.js \
-  -l lib/05_ssl_bypass.js \
-  --no-pause
+  -l lib/stealth-frida-hiding.js \
+  -l lib/android-ssl-pinning-bypass.js \
+  -l lib/android-proxy-override.js
 
 # Root + integrity bypass only
 frida -U -f com.target.app \
+  -l config.js \
   -l lib/utils.js \
-  -l lib/00_stealth.js \
-  -l lib/01_root_bypass.js \
-  -l lib/09_integrity_bypass.js \
-  --no-pause
+  -l lib/stealth-frida-hiding.js \
+  -l lib/root-detection-bypass.js \
+  -l lib/integrity-bypass.js
 ```
 
 ### REPL helpers (after attaching)

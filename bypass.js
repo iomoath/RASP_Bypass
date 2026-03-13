@@ -6,7 +6,7 @@
  * Contains all 24 modules inline.
  *
  * Usage:
- *   frida -U -f com.target.app -l bypass.js --no-pause
+ *   frida -U -f com.target.app -l bypass.js
  *
  * To customize, set BYPASS_CONFIG before any hooks run by prepending:
  *   // Edit configuration at the top of this file
