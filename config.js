@@ -2,11 +2,24 @@
  * config.js — Orchestrator + Configuration
  * RASP Bypass Toolkit — https://github.com/iomoath/RASP_Bypass
  *
- * Usage (modular mode):
- *   frida -U -f com.target.app -l config.js --no-pause
+ * Usage (modular mode — recommended):
+ *   frida -U -f com.target.app \
+ *     -l config.js \
+ *     -l lib/utils.js \
+ *     -l lib/stealth-frida-hiding.js \
+ *     -l lib/root-detection-bypass.js \
+ *     ... (add each lib/*.js module you need)
  *
  * Usage (with profile):
- *   frida -U -f com.bank.app -l config.js -l profiles/banking.js --no-pause
+ *   frida -U -f com.bank.app -l config.js -l profiles/banking.js \
+ *     -l lib/utils.js -l lib/stealth-frida-hiding.js ...
+ *
+ * Usage (single-file mode — easiest):
+ *   frida -U -f com.target.app -l bypass.js
+ *
+ * NOTE: Frida does not support require(). Modules must be loaded via
+ * separate -l flags or use bypass.js which has all modules inline.
+ * Use run.sh to generate the full command automatically.
  */
 
 'use strict';
@@ -15,6 +28,7 @@
 var BYPASS_CONFIG = {
     proxy: { host: '127.0.0.1', port: 8080, type: 'HTTP' },
     CERT_PEM: '-----BEGIN CERTIFICATE-----\n[YOUR CA CERT HERE]\n-----END CERTIFICATE-----',
+    forceProxy: true,
     modules: {
         stealthFrida  : true,
         stealthHook   : true,
@@ -106,51 +120,33 @@ var BYPASS_BUS = (function () {
     };
 })();
 
-// Module loader
-(function loadModules() {
-    var cfg = BYPASS_CONFIG.modules;
-    var MODULE_MAP = [
-        { key: 'stealthFrida',  file: 'lib/stealth-frida-hiding.js'               },
-        { key: 'stealthHook',   file: 'lib/stealth-hook-detection.js'             },
-        { key: 'root',          file: 'lib/root-detection-bypass.js'              },
-        { key: 'frida',         file: 'lib/frida-detection-bypass.js'             },
-        { key: 'debugger',      file: 'lib/debugger-detection-bypass.js'          },
-        { key: 'emulator',      file: 'lib/emulator-detection-bypass.js'          },
-        { key: 'vpn',           file: 'lib/vpn-detection-bypass.js'               },
-        { key: 'devMode',       file: 'lib/developer-mode-bypass.js'              },
-        { key: 'accessibility', file: 'lib/accessibility-bypass.js'               },
-        { key: 'screenCapture', file: 'lib/screen-capture-bypass.js'              },
-        { key: 'appCloning',    file: 'lib/app-cloning-bypass.js'                 },
-        { key: 'sslPinning',    file: 'lib/android-ssl-pinning-bypass.js'         },
-        { key: 'sslFallback',   file: 'lib/android-ssl-pinning-bypass-fallback.js'},
-        { key: 'certInjection', file: 'lib/android-system-certificate-injection.js'},
-        { key: 'nativeTls',     file: 'lib/native-tls-hook.js'                   },
-        { key: 'flutter',       file: 'lib/disable-flutter-tls.js'               },
-        { key: 'metaSsl',       file: 'lib/meta-ssl-pinning-bypass.js'            },
-        { key: 'proxyOverride', file: 'lib/android-proxy-override.js'            },
-        { key: 'nativeConnect', file: 'lib/native-connect-hook.js'               },
-        { key: 'integrity',     file: 'lib/integrity-bypass.js'                  },
-        { key: 'attestation',   file: 'lib/attestation-bypass.js'                },
-        { key: 'http3Disable',  file: 'lib/http3-disable.js'                     },
-        { key: 'syscall',       file: 'lib/syscall-bypass.js'                    },
-        { key: 'antiFrida',     file: 'lib/anti-frida-bypass.js'                 }
-    ];
-
-    if (cfg.flutter === 'auto') {
-        cfg.flutter = !!Process.findModuleByName('libflutter.so');
-        if (!cfg.flutter) setTimeout(function () { cfg.flutter = !!Process.findModuleByName('libflutter.so'); }, 2000);
+// Module loading — Frida does not support require().
+// Load modules by passing each lib/*.js file as a separate -l flag, e.g.:
+//
+//   Modular mode (selective):
+//     frida -U -f com.target.app \
+//       -l config.js \
+//       -l lib/utils.js \
+//       -l lib/stealth-frida-hiding.js \
+//       -l lib/root-detection-bypass.js \
+//       ... (add each module you need)
+//
+//   Single-file mode (all modules):
+//     frida -U -f com.target.app -l bypass.js
+//
+//   Auto-generate the full command:
+//     bash run.sh com.target.app
+//
+if (typeof BYPASS_CONFIG !== 'undefined') {
+    var _cfg = BYPASS_CONFIG.modules;
+    if (_cfg.flutter === 'auto') {
+        _cfg.flutter = !!Process.findModuleByName('libflutter.so');
+        if (!_cfg.flutter) {
+            setTimeout(function () { _cfg.flutter = !!Process.findModuleByName('libflutter.so'); }, 2000);
+        }
     }
-
-    try { require('lib/utils.js'); } catch (_) {}
-
-    MODULE_MAP.forEach(function (mod) {
-        var enabled = cfg[mod.key];
-        if (enabled === false) { BYPASS_BUS.log.debug('skip: ' + mod.key); return; }
-        try { require(mod.file); } catch (e) { BYPASS_BUS.log.debug('load error: ' + mod.file + ' — ' + e); }
-    });
-
-    BYPASS_BUS.log.ok('config.js — all modules loaded');
-})();
+}
+BYPASS_BUS.log.info('config.js loaded — add lib/*.js modules via -l flags, or use bypass.js for all-in-one mode');
 
 // REPL helpers
 function bypassStatus() { BYPASS_BUS.status(); }
